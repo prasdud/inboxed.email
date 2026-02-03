@@ -2,12 +2,30 @@ mod auth;
 mod commands;
 mod email;
 mod llm;
+mod db;
+
+use std::sync::{Arc, Mutex};
+use directories::ProjectDirs;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load environment variables from .env file (development only)
+    // In production builds, this file won't exist and that's fine
+    let _ = dotenvy::dotenv();
+
+    // Initialize database
+    let project_dirs = ProjectDirs::from("com", "inboxed", "inboxed")
+        .expect("Failed to get project directory");
+    let data_dir = project_dirs.data_dir();
+    std::fs::create_dir_all(data_dir).expect("Failed to create data directory");
+    let db_path = data_dir.join("emails.db");
+    let database = db::EmailDatabase::new(db_path).expect("Failed to initialize database");
+    let db_state = Arc::new(Mutex::new(Some(database)));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .manage(db_state)
         .invoke_handler(tauri::generate_handler![
             // Auth commands
             commands::check_auth_status,
@@ -37,6 +55,14 @@ pub fn run() {
             commands::get_model_info,
             commands::get_available_ai_models,
             commands::get_current_model_id,
+            // Database commands
+            commands::init_database,
+            commands::get_smart_inbox,
+            commands::get_emails_by_category,
+            commands::get_indexing_status,
+            commands::start_email_indexing,
+            commands::search_smart_emails,
+            commands::chat_query,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

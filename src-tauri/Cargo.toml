@@ -35,10 +35,14 @@ anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 lazy_static = "1.4"
 urlencoding = "2.1"
+dotenvy = "0.15"
 
 # LLM inference with Metal support
 llama-cpp-2 = "0.1"
 hf-hub = "0.3"
 futures = "0.3"
 directories = "5.0"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
 
