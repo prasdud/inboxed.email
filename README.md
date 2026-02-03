@@ -19,12 +19,16 @@ Inboxed is a lightweight, privacy-focused email client that runs a local LLM nat
 
 - **Gmail Integration**: OAuth 2.0 PKCE authentication with secure token storage
 - **Full Email Operations**: Read, compose, reply, archive, delete, star emails
+- **Smart Inbox**: AI-powered priority sorting with local SQLite database
+- **Intelligent Categorization**: Automatic email categorization (meetings, financial, newsletters, etc.)
 - **Local AI Summaries**: On-device LLM with streaming output
 - **Adaptive Summaries**: Length adjusts based on email size
 - **Priority Classification**: HIGH/MEDIUM/LOW with AI analysis
 - **Smart Insights**: Action items, deadlines, meetings, financial mentions
+- **Natural Language Chat**: Ask questions about your emails in plain English
+- **Background Indexing**: Non-blocking email processing with real-time progress
 - **Model Management**: Download and switch between AI models
-- **Privacy First**: All AI processing happens locally
+- **Privacy First**: All AI processing and data storage happens locally
 
 ## Development Status
 
@@ -61,9 +65,20 @@ Inboxed is a lightweight, privacy-focused email client that runs a local LLM nat
 - [x] Sidebar AI status indicator
 - [x] Fallback keyword-based analysis
 
+### ✅ Phase 4: Smart Inbox (COMPLETED)
+
+- [x] SQLite database for local email storage
+- [x] AI-powered priority scoring (HIGH/MEDIUM/LOW)
+- [x] Automatic email categorization (meetings, financial, newsletters, etc.)
+- [x] Background email indexing with progress tracking
+- [x] Smart Inbox view sorted by importance
+- [x] Natural language chat interface for email queries
+- [x] Insight detection (deadlines, meetings, financial mentions)
+- [x] Toggle between Smart Inbox and Classic views
+- [x] Search and filter capabilities
+
 ### 📋 Future Phases
 
-- **Phase 4**: Smart inbox with auto-sorting by priority
 - **Phase 5**: Windows support (Vulkan backend)
 - **Phase 6**: Multi-provider support (Outlook, Yahoo, IMAP)
 
@@ -111,7 +126,9 @@ npm run tauri build
    - **LFM2.5 1.2B Q8** (1.25 GB) - Higher quality
    - **Qwen 2.5 3B** (2 GB) - Better reasoning
 3. **Wait** for model download to complete
-4. **Use AI** - Click "AI Summary" on any email
+4. **Start Indexing** - Click "Start Indexing" in Smart Inbox to process emails
+5. **Use Smart Inbox** - View priority-sorted emails with AI summaries
+6. **Ask AI** - Use the chat interface for natural language queries
 
 ## AI Models
 
@@ -137,6 +154,25 @@ Summaries automatically adjust based on email length:
 | 401-800 words | 3-4 sentences |
 | 800+ words | 4-5 comprehensive sentences |
 
+## Smart Inbox
+
+The Smart Inbox provides AI-powered email management:
+
+**Priority Sorting:**
+- 🔴 **HIGH** - Urgent emails (score >= 0.7)
+- 🟡 **MEDIUM** - Normal emails (score >= 0.4)
+- ⚪ **LOW** - Less important emails (score < 0.4)
+
+**Categories:**
+- conversation, meetings, financial, newsletters, notifications, general
+
+**Chat Interface:**
+- Natural language queries: "Show me today's emails", "Find important emails"
+- Quick action buttons
+- Email summaries in responses
+
+**Database Location:** `~/Library/Application Support/inboxed/emails.db`
+
 ## Project Structure
 
 ```
@@ -147,19 +183,25 @@ emailApp/
 │   │   ├── Sidebar/          # Navigation + AI status
 │   │   ├── EmailList/        # Inbox list
 │   │   ├── EmailViewer/      # Email display + AI panel
+│   │   ├── SmartInbox/       # Smart inbox view + chat
 │   │   ├── Compose/          # Compose modal
 │   │   └── Settings/         # Model settings page
 │   ├── stores/
 │   │   ├── authStore.ts      # Auth state
 │   │   ├── emailStore.ts     # Email state
-│   │   └── aiStore.ts        # AI/model state
+│   │   ├── aiStore.ts        # AI/model state
+│   │   └── smartInboxStore.ts # Smart inbox state
 │   └── App.tsx
 ├── src-tauri/                # Rust backend
 │   ├── src/
 │   │   ├── commands/         # Tauri commands
 │   │   │   ├── ai.rs         # AI commands
 │   │   │   ├── auth.rs       # Auth commands
-│   │   │   └── email.rs      # Email commands
+│   │   │   ├── email.rs      # Email commands
+│   │   │   └── db.rs         # Database commands
+│   │   ├── db/
+│   │   │   ├── schema.rs     # Database schema
+│   │   │   └── email_db.rs   # Database operations
 │   │   ├── llm/
 │   │   │   ├── engine.rs     # LLM inference
 │   │   │   ├── model_manager.rs  # Downloads
@@ -167,6 +209,8 @@ emailApp/
 │   │   ├── auth/             # OAuth + storage
 │   │   └── email/            # Gmail API
 │   └── Cargo.toml
+├── PHASE_4_IMPLEMENTATION.md # Phase 4 detailed docs
+├── PHASE_4_QUICKSTART.md     # Phase 4 quick start
 ├── TASKS.md                  # Implementation progress
 └── README.md
 ```
@@ -182,6 +226,12 @@ RUST_LOG=debug npm run tauri dev
 
 # Check model directory
 ls ~/Library/Application\ Support/inboxed/models/
+
+# Check database
+ls ~/Library/Application\ Support/inboxed/emails.db
+
+# View database contents (requires sqlite3)
+sqlite3 ~/Library/Application\ Support/inboxed/emails.db "SELECT COUNT(*) FROM emails"
 ```
 
 ## Recommended IDE Setup

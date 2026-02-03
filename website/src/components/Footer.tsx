@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import logo from '../assets/logo.png';
 
 export default function Footer() {
     return (
@@ -6,7 +7,7 @@ export default function Footer() {
             <div className="container-custom">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-20">
                     <div className="col-span-1 md:col-span-2">
-                        <h2 className="font-serif text-5xl mb-6">inboxed.email</h2>
+                        <img src={logo} alt="Inboxed Logo" className="h-10 w-auto mb-6 invert" />
                         <p className="font-body text-lg text-white/70 max-w-md">
                             Reclaiming the inbox for the modern era. Private, local, and intelligent email for macOS.
                         </p>

@@ -1,16 +1,16 @@
 import { Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import logo from '../assets/logo.png';
 
 export default function Navbar() {
     return (
         <nav className="fixed top-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-sm border-b border-black">
             <div className="container-custom flex items-center justify-between h-20">
                 <div className="flex items-center gap-2">
-                    {/* Minimal Logo */}
-                    <Link to="/" className="w-8 h-8 bg-black flex items-center justify-center">
-                        <span className="text-white font-serif italic text-lg font-bold">i</span>
+                    {/* Logo */}
+                    <Link to="/" className="flex items-center gap-2">
+                        <img src={logo} alt="Inboxed Logo" className="h-8 w-auto" />
                     </Link>
-                    <Link to="/" className="font-serif text-2xl font-bold tracking-tight">inboxed.email</Link>
                 </div>
 
                 <div className="hidden md:flex items-center gap-8">

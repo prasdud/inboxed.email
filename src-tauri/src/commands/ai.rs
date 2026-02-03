@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
 lazy_static::lazy_static! {
-    static ref SUMMARIZER: Mutex<Option<Summarizer>> = Mutex::new(None);
+    pub static ref SUMMARIZER: Mutex<Option<Summarizer>> = Mutex::new(None);
     static ref MODEL_MANAGER: Mutex<Option<ModelManager>> = Mutex::new(None);
     static ref CURRENT_MODEL_ID: Mutex<Option<String>> = Mutex::new(None);
 }
