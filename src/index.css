@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-0;
+  }
+
+  :root {
+    --background: #FFFFFF;
+    --foreground: #000000;
+    --muted: #F5F5F5;
+    --muted-foreground: #525252;
+    --border: #000000;
+    --border-light: #E5E5E5;
+  }
+
+  body {
+    @apply bg-background text-foreground font-serif;
+    margin: 0;
+    min-height: 100vh;
+    font-feature-settings: "kern" 1, "liga" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    /* Subtle horizontal lines texture */
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      #000 1px,
+      #000 2px
+    );
+    background-size: 100% 4px;
+    opacity: 0.985;
+  }
+
+  #root {
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+  }
+}
+
+@layer utilities {
+  /* Custom border utilities */
+  .border-hairline {
+    border: 1px solid var(--border-light);
+  }
+
+  .border-thin {
+    border: 1px solid var(--border);
+  }
+
+  .border-medium {
+    border: 2px solid var(--border);
+  }
+
+  .border-thick {
+    border: 4px solid var(--border);
+  }
+
+  .border-ultra {
+    border: 8px solid var(--border);
+  }
+
+  /* Texture overlays */
+  .texture-lines {
+    position: relative;
+  }
+
+  .texture-lines::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      #000 1px,
+      #000 2px
+    );
+    background-size: 100% 4px;
+    opacity: 0.015;
+    pointer-events: none;
+  }
+
+  /* Inverted section */
+  .section-inverted {
+    @apply bg-foreground text-background;
+    background-image: repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 1px,
+      #fff 1px,
+      #fff 2px
+    );
+    background-size: 4px 100%;
+    opacity: 0.97;
+  }
+
+  /* Email content styles */
+  .email-content {
+    @apply text-foreground;
+  }
+
+  .email-content p {
+    @apply mb-4;
+  }
+
+  .email-content a {
+    @apply border-b border-foreground hover:bg-foreground hover:text-background transition-all duration-100;
+  }
+
+  .email-content h1,
+  .email-content h2,
+  .email-content h3 {
+    @apply font-display tracking-tight mt-8 mb-4;
+  }
+
+  .email-content ul,
+  .email-content ol {
+    @apply ml-6 mb-4;
+  }
+
+  .email-content blockquote {
+    @apply border-l-[4px] border-foreground pl-4 italic my-6;
+  }
+
+  .email-content img {
+    @apply border-[2px] border-borderLight my-6;
+  }
+}

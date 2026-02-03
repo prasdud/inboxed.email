@@ -1,0 +1,595 @@
+{
+  "project": "Inboxed",
+  "description": "AI-powered email desktop client with local LLM",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Foundation & Basic Email Client",
+      "status": "not_started",
+      "dependencies": [],
+      "deliverable": "Working prototype that authenticates with Gmail and displays inbox emails",
+      "tasks": [
+        {
+          "id": "1.1.1",
+          "title": "Initialize Tauri project with React + TypeScript",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "low",
+          "skills": ["tauri", "react", "typescript"],
+          "description": "Create new Tauri 2.0 project using create-tauri-app with React TypeScript template. Configure for macOS Apple Silicon build.",
+          "acceptance_criteria": [
+            "Project builds successfully with `npm run tauri dev`",
+            "Basic window opens with React content",
+            "Configured for Apple Silicon (aarch64-apple-darwin)"
+          ]
+        },
+        {
+          "id": "1.1.2",
+          "title": "Set up project structure and tooling",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "low",
+          "dependencies": ["1.1.1"],
+          "skills": ["eslint", "prettier", "typescript"],
+          "description": "Configure ESLint, Prettier, and establish folder structure as defined in PLAN.md",
+          "acceptance_criteria": [
+            "ESLint configured with React/TypeScript rules",
+            "Prettier configured for consistent formatting",
+            "Folder structure matches PLAN.md specification"
+          ]
+        },
+        {
+          "id": "1.2.1",
+          "title": "Set up Google Cloud Console OAuth credentials",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "low",
+          "dependencies": ["1.1.1"],
+          "skills": ["oauth", "google-api"],
+          "description": "Register application in Google Cloud Console, enable Gmail API, create OAuth 2.0 credentials for desktop app",
+          "acceptance_criteria": [
+            "OAuth client ID and secret obtained",
+            "Gmail API enabled",
+            "Correct redirect URIs configured"
+          ],
+          "notes": "User will need to manually complete this in Google Cloud Console"
+        },
+        {
+          "id": "1.2.2",
+          "title": "Implement OAuth 2.0 PKCE flow",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["1.1.1", "1.2.1"],
+          "skills": ["rust", "oauth", "tauri"],
+          "description": "Implement OAuth 2.0 with PKCE in Tauri backend. Open system browser for auth, handle callback via custom protocol or localhost server.",
+          "acceptance_criteria": [
+            "OAuth flow opens browser for Google sign-in",
+            "Successfully receives auth code callback",
+            "Exchanges code for access/refresh tokens",
+            "Handles auth errors gracefully"
+          ]
+        },
+        {
+          "id": "1.2.3",
+          "title": "Implement secure token storage",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["1.2.2"],
+          "skills": ["rust", "security", "keyring"],
+          "description": "Store OAuth tokens securely in system keychain using keyring crate. Implement token retrieval and refresh logic.",
+          "acceptance_criteria": [
+            "Tokens stored in macOS Keychain",
+            "Tokens retrieved on app restart",
+            "Token refresh works when access token expires",
+            "No tokens stored in plain text files"
+          ]
+        },
+        {
+          "id": "1.3.1",
+          "title": "Create Gmail API client in Rust",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["1.2.3"],
+          "skills": ["rust", "gmail-api", "http"],
+          "description": "Implement Gmail API client using reqwest. Support fetching messages list, message details, and handling pagination.",
+          "acceptance_criteria": [
+            "Can list inbox messages (paginated)",
+            "Can fetch individual message details",
+            "Handles API errors and rate limits",
+            "Properly uses access token for auth"
+          ]
+        },
+        {
+          "id": "1.3.2",
+          "title": "Parse email content",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["1.3.1"],
+          "skills": ["rust", "email-parsing"],
+          "description": "Parse email headers (from, to, subject, date) and body (handle MIME, HTML, and plain text). Use mail-parser crate.",
+          "acceptance_criteria": [
+            "Correctly extracts all header fields",
+            "Handles HTML and plain text bodies",
+            "Handles multipart MIME messages",
+            "Extracts attachment metadata"
+          ]
+        },
+        {
+          "id": "1.3.3",
+          "title": "Create Tauri commands for email operations",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "low",
+          "dependencies": ["1.3.2"],
+          "skills": ["rust", "tauri"],
+          "description": "Expose Rust email functions as Tauri commands callable from React frontend.",
+          "acceptance_criteria": [
+            "get_emails command returns paginated list",
+            "get_email command returns single email details",
+            "Commands handle errors and return proper types",
+            "TypeScript types generated for commands"
+          ]
+        },
+        {
+          "id": "1.4.1",
+          "title": "Create app layout with sidebar",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "low",
+          "dependencies": ["1.1.2"],
+          "skills": ["react", "tailwind"],
+          "description": "Create main app layout with collapsible sidebar showing folders (Inbox, Sent, Drafts, Trash, Spam).",
+          "acceptance_criteria": [
+            "Sidebar renders with folder list",
+            "Sidebar can collapse/expand",
+            "Active folder highlighted",
+            "Responsive layout"
+          ]
+        },
+        {
+          "id": "1.4.2",
+          "title": "Create email list component",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["1.4.1", "1.3.3"],
+          "skills": ["react", "tailwind", "typescript"],
+          "description": "Create email list showing sender, subject, preview, date, and read/unread status. Implement virtual scrolling for performance.",
+          "acceptance_criteria": [
+            "Displays email list from API",
+            "Shows sender avatar/initial, subject, snippet, date",
+            "Visual distinction for read/unread",
+            "Pagination or infinite scroll works",
+            "Handles loading and empty states"
+          ]
+        },
+        {
+          "id": "1.4.3",
+          "title": "Create email viewer component",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["1.4.2"],
+          "skills": ["react", "html-rendering"],
+          "description": "Create email detail view that safely renders HTML email content with proper styling isolation.",
+          "acceptance_criteria": [
+            "Displays email headers (from, to, cc, subject, date)",
+            "Safely renders HTML content (sanitized)",
+            "Falls back to plain text when needed",
+            "Shows attachment list",
+            "Responsive layout"
+          ]
+        },
+        {
+          "id": "1.4.4",
+          "title": "Add loading states and error handling",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "low",
+          "dependencies": ["1.4.3"],
+          "skills": ["react"],
+          "description": "Implement loading skeletons, error messages, and retry logic throughout the UI.",
+          "acceptance_criteria": [
+            "Loading skeletons for email list",
+            "Error messages for failed requests",
+            "Retry button for recoverable errors",
+            "Offline state indication"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Full Email Operations",
+      "status": "not_started",
+      "dependencies": ["phase-1"],
+      "deliverable": "Fully functional email client with send, reply, delete, search capabilities",
+      "tasks": [
+        {
+          "id": "2.1.1",
+          "title": "Create compose email UI",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["react", "tiptap"],
+          "description": "Create compose modal/view with To, CC, BCC, Subject fields and TipTap rich text editor for body."
+        },
+        {
+          "id": "2.1.2",
+          "title": "Implement send email backend",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "gmail-api"],
+          "description": "Implement Gmail API send message endpoint. Handle MIME encoding and draft creation."
+        },
+        {
+          "id": "2.1.3",
+          "title": "Implement attachment support",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "react", "file-handling"],
+          "description": "File picker for attachments, upload to Gmail, display attachment list in compose."
+        },
+        {
+          "id": "2.2.1",
+          "title": "Implement reply/forward actions",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["react", "rust"],
+          "description": "Reply, Reply All, Forward functionality with proper quoting and headers."
+        },
+        {
+          "id": "2.2.2",
+          "title": "Implement delete/archive actions",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "low",
+          "skills": ["rust", "gmail-api"],
+          "description": "Move to trash, permanent delete, archive operations via Gmail API."
+        },
+        {
+          "id": "2.2.3",
+          "title": "Implement mark read/unread and star",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "low",
+          "skills": ["rust", "gmail-api"],
+          "description": "Toggle read status and star/flag emails."
+        },
+        {
+          "id": "2.3.1",
+          "title": "Implement labels management",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "react", "gmail-api"],
+          "description": "Fetch labels, apply/remove labels, create custom labels."
+        },
+        {
+          "id": "2.4.1",
+          "title": "Implement search functionality",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "react", "gmail-api"],
+          "description": "Search UI with Gmail API search integration. Support filters for from, to, date, has:attachment."
+        },
+        {
+          "id": "2.5.1",
+          "title": "Set up SQLite database",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "sqlite"],
+          "description": "Create SQLite schema for caching emails, labels, and sync state. Use rusqlite."
+        },
+        {
+          "id": "2.5.2",
+          "title": "Implement email caching",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["2.5.1"],
+          "skills": ["rust", "sqlite"],
+          "description": "Cache emails locally, load from cache first, sync in background."
+        },
+        {
+          "id": "2.5.3",
+          "title": "Implement incremental sync",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "dependencies": ["2.5.2"],
+          "skills": ["rust", "gmail-api"],
+          "description": "Use Gmail History API for efficient incremental sync. Handle full sync fallback."
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Local LLM Integration",
+      "status": "not_started",
+      "dependencies": ["phase-2"],
+      "deliverable": "Email summarization powered by local LLM on Apple Silicon",
+      "tasks": [
+        {
+          "id": "3.1.1",
+          "title": "Integrate llama-cpp-rs",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "skills": ["rust", "llm", "metal"],
+          "description": "Add llama-cpp-rs dependency, configure for Metal acceleration on Apple Silicon."
+        },
+        {
+          "id": "3.1.2",
+          "title": "Create model loading system",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["3.1.1"],
+          "skills": ["rust"],
+          "description": "Load/unload model, handle first-run setup, show progress indicator."
+        },
+        {
+          "id": "3.1.3",
+          "title": "Implement async inference queue",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "dependencies": ["3.1.2"],
+          "skills": ["rust", "async"],
+          "description": "Non-blocking inference using channels/workers. Queue multiple requests."
+        },
+        {
+          "id": "3.2.1",
+          "title": "Bundle model with application",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["tauri", "build"],
+          "description": "Bundle Gemma 2B Q4_K_M model, extract on first run, handle updates."
+        },
+        {
+          "id": "3.3.1",
+          "title": "Design summarization prompts",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["prompt-engineering"],
+          "description": "Create effective prompts for email summarization. Test with various email types."
+        },
+        {
+          "id": "3.3.2",
+          "title": "Implement summarization feature",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["3.1.3", "3.3.1"],
+          "skills": ["rust", "react"],
+          "description": "Summarize button in email view, show summary, cache results in DB."
+        },
+        {
+          "id": "3.3.3",
+          "title": "Implement thread summarization",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "dependencies": ["3.3.2"],
+          "skills": ["rust"],
+          "description": "Summarize entire email threads/conversations in one summary."
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Smart Sorting & Categorization",
+      "status": "not_started",
+      "dependencies": ["phase-3"],
+      "deliverable": "AI-powered automatic email categorization and priority sorting",
+      "tasks": [
+        {
+          "id": "4.1.1",
+          "title": "Design classification prompts",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["prompt-engineering"],
+          "description": "Create prompts for categorizing: Important, Updates, Social, Promotions, Spam."
+        },
+        {
+          "id": "4.1.2",
+          "title": "Implement batch classification",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "dependencies": ["4.1.1"],
+          "skills": ["rust"],
+          "description": "Classify new emails in background, store categories in DB."
+        },
+        {
+          "id": "4.2.1",
+          "title": "Implement priority scoring",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "prompt-engineering"],
+          "description": "Score email priority based on sender, content, urgency keywords."
+        },
+        {
+          "id": "4.3.1",
+          "title": "Create smart inbox views",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "dependencies": ["4.1.2", "4.2.1"],
+          "skills": ["react"],
+          "description": "Priority Inbox, Focus view, category filters in UI."
+        },
+        {
+          "id": "4.4.1",
+          "title": "Implement action suggestions",
+          "status": "not_started",
+          "priority": "low",
+          "estimated_complexity": "high",
+          "skills": ["rust", "react"],
+          "description": "Suggest quick replies, identify emails needing response, extract deadlines."
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Windows Support & Polish",
+      "status": "not_started",
+      "dependencies": ["phase-4"],
+      "deliverable": "Production-ready app on macOS and Windows",
+      "tasks": [
+        {
+          "id": "5.1.1",
+          "title": "Configure Windows build",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "skills": ["tauri", "windows", "vulkan"],
+          "description": "Set up Tauri for Windows, configure Vulkan/DirectML for LLM inference."
+        },
+        {
+          "id": "5.1.2",
+          "title": "Create Windows installer",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["5.1.1"],
+          "skills": ["windows", "installer"],
+          "description": "MSI or NSIS installer, handle model bundling."
+        },
+        {
+          "id": "5.2.1",
+          "title": "Implement CPU fallback",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "llm"],
+          "description": "CPU-only inference path, smaller model option, hardware auto-detection."
+        },
+        {
+          "id": "5.3.1",
+          "title": "Implement theming",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "skills": ["react", "tailwind"],
+          "description": "Dark/light theme, system preference sync, theme toggle."
+        },
+        {
+          "id": "5.3.2",
+          "title": "Implement keyboard shortcuts",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "low",
+          "skills": ["react"],
+          "description": "Global keyboard shortcuts for common actions."
+        },
+        {
+          "id": "5.3.3",
+          "title": "Create settings panel",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "skills": ["react"],
+          "description": "Settings for sync, AI options, appearance, notifications."
+        },
+        {
+          "id": "5.4.1",
+          "title": "Performance optimization",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "skills": ["rust", "react", "profiling"],
+          "description": "Memory leak audit, performance profiling, optimization."
+        },
+        {
+          "id": "5.5.1",
+          "title": "Implement auto-updates",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "skills": ["tauri"],
+          "description": "Tauri updater integration, model update mechanism."
+        }
+      ]
+    },
+    {
+      "id": "phase-6",
+      "name": "Multi-Provider Support",
+      "status": "not_started",
+      "dependencies": ["phase-5"],
+      "deliverable": "Universal email client supporting multiple providers",
+      "tasks": [
+        {
+          "id": "6.1.1",
+          "title": "Implement IMAP client",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "skills": ["rust", "imap"],
+          "description": "Generic IMAP client using async-imap crate."
+        },
+        {
+          "id": "6.1.2",
+          "title": "Implement SMTP client",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "dependencies": ["6.1.1"],
+          "skills": ["rust", "smtp"],
+          "description": "SMTP client for sending via lettre crate."
+        },
+        {
+          "id": "6.2.1",
+          "title": "Implement Outlook adapter",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "skills": ["rust", "microsoft-graph", "oauth"],
+          "description": "Microsoft OAuth + Graph API for Outlook/365."
+        },
+        {
+          "id": "6.2.2",
+          "title": "Implement Yahoo adapter",
+          "status": "not_started",
+          "priority": "medium",
+          "estimated_complexity": "medium",
+          "skills": ["rust", "oauth"],
+          "description": "Yahoo OAuth integration."
+        },
+        {
+          "id": "6.3.1",
+          "title": "Implement unified inbox",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "high",
+          "dependencies": ["6.1.1", "6.2.1"],
+          "skills": ["rust", "react"],
+          "description": "Aggregate emails from multiple accounts with color coding."
+        },
+        {
+          "id": "6.4.1",
+          "title": "Create account management UI",
+          "status": "not_started",
+          "priority": "high",
+          "estimated_complexity": "medium",
+          "skills": ["react"],
+          "description": "Add/remove accounts, account settings, status indicators."
+        }
+      ]
+    }
+  ]
+}
