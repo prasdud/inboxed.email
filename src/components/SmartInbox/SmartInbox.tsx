@@ -9,7 +9,11 @@ const PRIORITY_LABELS = {
   LOW: '⚪',
 }
 
-export function SmartInbox() {
+interface SmartInboxProps {
+  onCompose?: () => void
+}
+
+export function SmartInbox({ onCompose }: SmartInboxProps) {
   const {
     emails,
     loading,
@@ -106,24 +110,28 @@ export function SmartInbox() {
 
   return (
     <div className="flex-1 flex flex-col bg-background h-full overflow-hidden">
-      {/* Header */}
-      <div className="px-6 py-5 border-b-[2px] border-foreground flex items-center justify-between flex-shrink-0">
-        <div>
-          <h2 className="font-display text-2xl tracking-tight">Smart Inbox</h2>
-          <p className="text-xs text-mutedForeground mt-1">
-            {indexingStatus?.is_indexing
-              ? `Indexing emails... ${indexingProgress}%`
-              : `${emails.length} emails sorted by importance`}
-          </p>
-        </div>
+      {/* Action Bar */}
+      <div className="px-6 py-3 border-b-[2px] border-foreground flex items-center justify-between flex-shrink-0">
+        <p className="text-sm text-mutedForeground">
+          {indexingStatus?.is_indexing
+            ? `Indexing emails... ${indexingProgress}%`
+            : `${emails.length} emails sorted by importance`}
+        </p>
         <div className="flex items-center gap-2">
+          {onCompose && (
+            <button
+              onClick={onCompose}
+              className="px-4 py-2 bg-foreground text-background hover:bg-gray-700 text-sm font-mono uppercase tracking-wider transition-colors"
+            >
+              Compose
+            </button>
+          )}
           <button
             onClick={() => setShowChat(!showChat)}
-            className={`px-4 py-2 text-sm font-mono uppercase tracking-wider transition-colors ${
-              showChat
+            className={`px-4 py-2 text-sm font-mono uppercase tracking-wider transition-colors ${showChat
                 ? 'bg-foreground text-background'
                 : 'border-[2px] border-foreground hover:bg-foreground hover:text-background'
-            }`}
+              }`}
           >
             {showChat ? 'Hide Chat' : 'Ask AI'}
           </button>
@@ -178,9 +186,8 @@ export function SmartInbox() {
                 <div
                   key={email.id}
                   onClick={() => handleEmailClick(email.id)}
-                  className={`px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors ${
-                    !email.is_read ? 'bg-blue-50' : ''
-                  }`}
+                  className={`px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors ${!email.is_read ? 'bg-blue-50' : ''
+                    }`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -196,9 +203,8 @@ export function SmartInbox() {
                         )}
                       </div>
                       <h3
-                        className={`font-medium mb-1 truncate ${
-                          !email.is_read ? 'font-bold' : ''
-                        }`}
+                        className={`font-medium mb-1 truncate ${!email.is_read ? 'font-bold' : ''
+                          }`}
                       >
                         {email.subject}
                       </h3>
@@ -221,7 +227,7 @@ export function SmartInbox() {
 
         {/* Chat Panel */}
         {showChat && (
-          <div className="w-96 border-l-[2px] border-foreground">
+          <div className="w-[30%] min-w-[280px] max-w-[24rem] flex-shrink-0 border-l-[2px] border-foreground">
             <ChatPanel onClose={() => setShowChat(false)} />
           </div>
         )}

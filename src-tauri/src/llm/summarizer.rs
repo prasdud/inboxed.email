@@ -410,6 +410,48 @@ impl Summarizer {
 
         Ok("LOW".to_string())
     }
+
+    /// Generate a conversational chat response
+    pub fn chat(
+        &self,
+        user_message: &str,
+        email_context: Option<&str>,
+    ) -> Result<String> {
+        if let Some(engine) = &self.engine {
+            let system = if email_context.is_some() {
+                "You are an intelligent email assistant for Inboxed. Help users understand their emails. Be concise and conversational. Only reference information from the provided context."
+            } else {
+                "You are an intelligent email assistant for Inboxed. Be helpful and concise."
+            };
+
+            let user = match email_context {
+                Some(ctx) => format!("Email context:\n{}\n\nUser: {}", ctx, user_message),
+                None => user_message.to_string(),
+            };
+
+            let prompt = self.format_prompt(system, &user);
+            let params = GenerationParams {
+                max_tokens: 300,
+                temperature: 0.7,
+                stop_sequences: self.get_stop_sequences(),
+                ..Default::default()
+            };
+
+            engine.generate(&prompt, &params)
+        } else {
+            // Fallback when no model loaded
+            Ok(Self::fallback_chat_response(email_context))
+        }
+    }
+
+    /// Fallback response when LLM is not available
+    fn fallback_chat_response(email_context: Option<&str>) -> String {
+        if email_context.is_some() {
+            "I found some relevant emails for you. Please note that the AI model isn't loaded, so I can't provide a detailed analysis. Check the email list for details.".to_string()
+        } else {
+            "I'm your email assistant! I can help you find and understand your emails. Try asking about today's emails, important messages, or search for specific topics.".to_string()
+        }
+    }
 }
 
 impl Default for Summarizer {

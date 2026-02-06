@@ -9,6 +9,7 @@ pub struct Email {
     pub from_email: String,
     pub to: Vec<String>,
     pub date: String,
+    pub date_timestamp: i64, // Unix timestamp for database storage
     pub snippet: String,
     pub body_html: Option<String>,
     pub body_plain: Option<String>,

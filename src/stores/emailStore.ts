@@ -26,23 +26,24 @@ interface EmailStore {
   selectedEmail: Email | null
   loading: boolean
   error: string | null
-  fetchEmails: (maxResults?: number, query?: string) => Promise<void>
+  fetchEmails: (maxResults?: number, query?: string, forceRefresh?: boolean) => Promise<void>
   selectEmail: (emailId: string) => Promise<void>
   clearSelection: () => void
 }
 
-export const useEmailStore = create<EmailStore>((set, get) => ({
+export const useEmailStore = create<EmailStore>((set) => ({
   emails: [],
   selectedEmail: null,
   loading: false,
   error: null,
 
-  fetchEmails: async (maxResults = 50, query) => {
+  fetchEmails: async (maxResults = 50, query, forceRefresh = false) => {
     try {
       set({ loading: true, error: null })
       const emails = await invoke<EmailListItem[]>('fetch_emails', {
         maxResults,
         query,
+        forceRefresh,
       })
       set({ emails, loading: false })
     } catch (error) {

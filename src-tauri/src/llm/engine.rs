@@ -7,13 +7,41 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Once};
 
 /// Default generation parameters
 const DEFAULT_MAX_TOKENS: u32 = 256;
 const DEFAULT_TEMPERATURE: f32 = 0.7;
 const DEFAULT_TOP_P: f32 = 0.9;
 const DEFAULT_CONTEXT_SIZE: u32 = 4096;
+
+/// Global singleton for the LlamaBackend (can only be initialized once per process)
+static BACKEND_INIT: Once = Once::new();
+static LLAMA_BACKEND: Mutex<Option<Arc<LlamaBackend>>> = Mutex::new(None);
+
+/// Get or initialize the global LlamaBackend
+fn get_backend() -> Result<Arc<LlamaBackend>> {
+    let mut init_error: Option<String> = None;
+
+    BACKEND_INIT.call_once(|| match LlamaBackend::init() {
+        Ok(backend) => {
+            let mut guard = LLAMA_BACKEND.lock().unwrap();
+            *guard = Some(Arc::new(backend));
+        }
+        Err(e) => {
+            init_error = Some(format!("Failed to initialize LlamaBackend: {:?}", e));
+        }
+    });
+
+    if let Some(err) = init_error {
+        return Err(anyhow!(err));
+    }
+
+    let guard = LLAMA_BACKEND.lock().unwrap();
+    guard
+        .clone()
+        .ok_or_else(|| anyhow!("LlamaBackend not initialized"))
+}
 
 /// LLM Engine for text generation with Metal acceleration
 pub struct LlmEngine {
@@ -45,8 +73,8 @@ impl LlmEngine {
     /// Create a new LlmEngine by loading a model from the given path
     /// Automatically uses Metal acceleration on macOS
     pub fn new(model_path: &Path) -> Result<Self> {
-        // Initialize the backend
-        let backend = LlamaBackend::init()?;
+        // Get the singleton backend (initialized once per process)
+        let backend = get_backend()?;
 
         // Configure model parameters
         // Metal/GPU acceleration is enabled by default on macOS
@@ -58,7 +86,7 @@ impl LlmEngine {
 
         Ok(Self {
             model: Arc::new(model),
-            backend: Arc::new(backend),
+            backend,
         })
     }
 

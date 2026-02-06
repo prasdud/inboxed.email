@@ -130,6 +130,20 @@ async fn index_emails_background<R: tauri::Runtime>(
     access_token: String,
     max_emails: usize,
 ) -> Result<()> {
+    // Check if summarizer is available and model is loaded
+    {
+        let summarizer_guard = SUMMARIZER.lock().unwrap();
+        if let Some(summarizer) = summarizer_guard.as_ref() {
+            if summarizer.is_model_loaded() {
+                println!("[Indexing] Starting with LLM model loaded - summaries will use AI");
+            } else {
+                println!("[Indexing] Starting with fallback mode - summaries will use keyword extraction");
+            }
+        } else {
+            println!("[Indexing] WARNING: No summarizer available - summaries will be skipped");
+        }
+    }
+
     // Mark as indexing
     database.update_indexing_status(true, None, Some(0), None)?;
     let _ = app.emit("indexing:started", ());
@@ -200,10 +214,23 @@ async fn generate_email_insights(email: &Email) -> EmailInsight {
     let summary = {
         let summarizer_guard = SUMMARIZER.lock().unwrap();
         if let Some(summarizer) = summarizer_guard.as_ref() {
-            summarizer
-                .summarize_email(&email.subject, &email.from, body)
-                .ok()
+            if summarizer.is_model_loaded() {
+                match summarizer.summarize_email(&email.subject, &email.from, body) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        eprintln!("[Indexing] LLM summarization failed for {}: {}", email.id, e);
+                        None
+                    }
+                }
+            } else {
+                // Model exists but not loaded - use fallback
+                println!("[Indexing] Model not loaded, using fallback for: {}", email.id);
+                summarizer
+                    .summarize_email(&email.subject, &email.from, body)
+                    .ok()
+            }
         } else {
+            println!("[Indexing] No summarizer available, skipping summary for: {}", email.id);
             None
         }
     };
@@ -306,92 +333,192 @@ fn categorize_email(email: &Email, body: &str) -> String {
     "general".to_string()
 }
 
+/// Query intent categories for chat
+#[derive(Debug)]
+enum QueryIntent {
+    TodayEmails,
+    ImportantEmails,
+    SearchEmails(String),
+    GeneralEmailQuestion,
+    GeneralChat,
+}
+
+/// Check if query is asking about the AI's identity
+fn is_identity_query(query: &str) -> bool {
+    let q = query.to_lowercase();
+    q.contains("which model")
+        || q.contains("what model")
+        || q.contains("who are you")
+        || q.contains("what are you")
+        || q.contains("what can you do")
+        || q.contains("your name")
+        || q.contains("introduce yourself")
+}
+
+/// Get a response about AI identity without using LLM
+fn get_identity_response() -> String {
+    "I'm your intelligent email assistant for Inboxed! I use a local AI model (LFM2.5) running on your device to help you:\n\n\
+    • Summarize and understand your emails\n\
+    • Find important or urgent messages\n\
+    • Search through your inbox\n\
+    • Answer questions about your emails\n\n\
+    All processing happens locally on your device for privacy. Try asking me about today's emails or any important messages!".to_string()
+}
+
+/// Detect the intent of a chat query
+fn detect_intent(query: &str) -> QueryIntent {
+    let q = query.to_lowercase();
+
+    // Check for today's emails
+    if q.contains("today") || q.contains("today's") {
+        return QueryIntent::TodayEmails;
+    }
+
+    // Check for important/priority emails
+    if q.contains("important") || q.contains("priority") || q.contains("urgent") {
+        return QueryIntent::ImportantEmails;
+    }
+
+    // Check for explicit search queries
+    if q.starts_with("search ") || q.starts_with("find ") || q.starts_with("from ") {
+        let search_term = q
+            .trim_start_matches("search ")
+            .trim_start_matches("find ")
+            .trim_start_matches("from ")
+            .to_string();
+        return QueryIntent::SearchEmails(search_term);
+    }
+
+    // Check for email-related keywords
+    let email_keywords = ["email", "emails", "message", "messages", "inbox", "mail", "sent", "received", "unread"];
+    if email_keywords.iter().any(|kw| q.contains(kw)) {
+        return QueryIntent::GeneralEmailQuestion;
+    }
+
+    // Default to general chat
+    QueryIntent::GeneralChat
+}
+
+/// Format email context for LLM consumption (compact, ~500 tokens max)
+fn format_email_context(emails: &[EmailWithInsight], max_emails: usize) -> String {
+    emails
+        .iter()
+        .take(max_emails)
+        .map(|e| {
+            let summary = e.summary.clone().unwrap_or_else(|| {
+                // Truncate snippet if no summary
+                let snippet = &e.snippet;
+                if snippet.len() > 100 {
+                    format!("{}...", &snippet[..100])
+                } else {
+                    snippet.clone()
+                }
+            });
+            format!(
+                "- From: {} | Subject: {} | Priority: {} | Summary: {}",
+                e.from_name, e.subject, e.priority, summary
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[tauri::command]
 pub async fn chat_query(
     db: State<'_, DbState>,
     query: String,
 ) -> Result<String, String> {
-    let query_lower = query.to_lowercase();
+    // Handle identity queries without LLM
+    if is_identity_query(&query) {
+        return Ok(get_identity_response());
+    }
 
-    // Parse query intent
-    if query_lower.contains("today") || query_lower.contains("today's") {
-        // Get emails from today
+    let intent = detect_intent(&query);
+
+    // Get relevant emails based on intent
+    let (emails, context_description) = {
         let db_lock = db.lock().unwrap();
         let database = db_lock.as_ref().ok_or("Database not initialized")?;
-        let emails = database
-            .get_emails_from_today()
-            .map_err(|e: anyhow::Error| e.to_string())?;
 
-        if emails.is_empty() {
-            return Ok("You haven't received any emails today yet.".to_string());
+        match &intent {
+            QueryIntent::TodayEmails => {
+                let emails = database
+                    .get_emails_from_today()
+                    .map_err(|e: anyhow::Error| e.to_string())?;
+                (emails, "today's emails")
+            }
+            QueryIntent::ImportantEmails => {
+                let emails = database
+                    .get_emails_by_priority(20, 0)
+                    .map_err(|e: anyhow::Error| e.to_string())?;
+                let high_priority: Vec<_> = emails
+                    .into_iter()
+                    .filter(|e| e.priority == "HIGH")
+                    .collect();
+                (high_priority, "high priority emails")
+            }
+            QueryIntent::SearchEmails(term) => {
+                let emails = database
+                    .search_emails(term, 10)
+                    .map_err(|e: anyhow::Error| e.to_string())?;
+                (emails, "search results")
+            }
+            QueryIntent::GeneralEmailQuestion => {
+                let emails = database
+                    .get_emails_by_priority(10, 0)
+                    .map_err(|e: anyhow::Error| e.to_string())?;
+                (emails, "recent emails")
+            }
+            QueryIntent::GeneralChat => {
+                // No email context needed for general chat
+                (vec![], "")
+            }
         }
+    };
 
-        // Generate summary
-        let summaries: Vec<String> = emails.iter()
-            .take(10)
-            .map(|e| {
-                let summary = e.summary.clone().unwrap_or_else(|| e.snippet.clone());
-                format!("• {} from {} - {}", e.subject, e.from_name, summary)
-            })
-            .collect();
-
-        Ok(format!(
-            "You received {} emails today. Here are the highlights:\n\n{}",
+    // Prepare email context if we have emails
+    let email_context = if !emails.is_empty() {
+        Some(format!(
+            "Found {} {}:\n{}",
             emails.len(),
-            summaries.join("\n")
+            context_description,
+            format_email_context(&emails, 8)
         ))
-    } else if query_lower.contains("important") || query_lower.contains("priority") {
-        // Get high priority emails
-        let db_lock = db.lock().unwrap();
-        let database = db_lock.as_ref().ok_or("Database not initialized")?;
-        let emails = database
-            .get_emails_by_priority(10, 0)
-            .map_err(|e: anyhow::Error| e.to_string())?;
+    } else if !matches!(intent, QueryIntent::GeneralChat) {
+        // Email query but no results
+        return Ok(match intent {
+            QueryIntent::TodayEmails => "You haven't received any emails today yet.".to_string(),
+            QueryIntent::ImportantEmails => "You don't have any high priority emails right now.".to_string(),
+            QueryIntent::SearchEmails(term) => format!("I couldn't find any emails matching '{}'.", term),
+            _ => "I couldn't find any relevant emails.".to_string(),
+        });
+    } else {
+        None
+    };
 
-        let high_priority: Vec<_> = emails.iter()
-            .filter(|e| e.priority == "HIGH")
-            .collect();
-
-        if high_priority.is_empty() {
-            return Ok("You don't have any high priority emails right now.".to_string());
+    // Try to use LLM for response
+    let summarizer_guard = SUMMARIZER.lock().unwrap();
+    if let Some(summarizer) = summarizer_guard.as_ref() {
+        if summarizer.is_model_loaded() {
+            // Use LLM for intelligent response
+            match summarizer.chat(&query, email_context.as_deref()) {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    eprintln!("[Chat] LLM error: {}", e);
+                    // Fall through to fallback
+                }
+            }
         }
+    }
+    drop(summarizer_guard);
 
-        let summaries: Vec<String> = high_priority.iter()
-            .map(|e| {
-                let summary = e.summary.clone().unwrap_or_else(|| e.snippet.clone());
-                format!("• {} from {} - {}", e.subject, e.from_name, summary)
-            })
-            .collect();
-
+    // Fallback: return formatted email list or helpful message
+    if let Some(ctx) = email_context {
         Ok(format!(
-            "You have {} high priority emails:\n\n{}",
-            high_priority.len(),
-            summaries.join("\n")
+            "Here's what I found:\n\n{}\n\n(Note: AI model not loaded for detailed analysis)",
+            ctx
         ))
     } else {
-        // General search
-        let db_lock = db.lock().unwrap();
-        let database = db_lock.as_ref().ok_or("Database not initialized")?;
-        let emails = database
-            .search_emails(&query, 5)
-            .map_err(|e: anyhow::Error| e.to_string())?;
-
-        if emails.is_empty() {
-            return Ok(format!("I couldn't find any emails matching '{}'.", query));
-        }
-
-        let summaries: Vec<String> = emails.iter()
-            .map(|e| {
-                let summary = e.summary.clone().unwrap_or_else(|| e.snippet.clone());
-                format!("• {} from {} - {}", e.subject, e.from_name, summary)
-            })
-            .collect();
-
-        Ok(format!(
-            "Found {} emails matching '{}':\n\n{}",
-            emails.len(),
-            query,
-            summaries.join("\n")
-        ))
+        Ok("I'm your email assistant! I can help you find and understand your emails. Try asking about today's emails, important messages, or search for specific topics.".to_string())
     }
 }

@@ -7,7 +7,8 @@ export default function EmailList() {
 
   useEffect(() => {
     fetchEmails(50)
-  }, [fetchEmails])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const formatDate = (dateStr: string) => {
     try {
@@ -79,15 +80,14 @@ export default function EmailList() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {emails.map((email, index) => (
+      {emails.map((email) => (
         <button
           key={email.id}
           onClick={() => selectEmail(email.id)}
-          className={`group w-full text-left px-6 py-6 border-b border-borderLight transition-all duration-100 hover:bg-foreground hover:text-background focus-visible:outline focus-visible:outline-3 focus-visible:outline-foreground focus-visible:outline-offset-[-3px] ${
-            selectedEmail?.id === email.id
+          className={`group w-full text-left px-6 py-6 border-b border-borderLight transition-all duration-100 hover:bg-foreground hover:text-background focus-visible:outline focus-visible:outline-3 focus-visible:outline-foreground focus-visible:outline-offset-[-3px] ${selectedEmail?.id === email.id
               ? 'bg-foreground text-background'
               : ''
-          }`}
+            }`}
         >
           <div className="flex items-start gap-4">
             {/* Decorative element for unread */}

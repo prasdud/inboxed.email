@@ -34,8 +34,12 @@ interface AiStore {
   isAiReady: boolean  // True when AI can be used (model loaded or fallback ready)
   modelInfo: ModelInfo | null
   availableModels: ModelOption[]
+  downloadedModels: ModelOption[]
   selectedModelId: string | null
+  activeModelId: string | null  // Currently loaded model
   error: string | null
+  isDeleting: boolean
+  isActivating: boolean
 
   // Actions
   checkModelStatus: () => Promise<void>
@@ -43,6 +47,10 @@ interface AiStore {
   initAi: () => Promise<boolean>
   getModelInfo: () => Promise<void>
   getAvailableModels: () => Promise<void>
+  getDownloadedModels: () => Promise<void>
+  getActiveModelId: () => Promise<void>
+  deleteModel: (modelId: string) => Promise<void>
+  activateModel: (modelId: string) => Promise<void>
   setSelectedModel: (modelId: string) => void
   reset: () => void
 }
@@ -54,8 +62,12 @@ export const useAiStore = create<AiStore>((set, get) => ({
   isAiReady: false,
   modelInfo: null,
   availableModels: [],
+  downloadedModels: [],
   selectedModelId: null,
+  activeModelId: null,
   error: null,
+  isDeleting: false,
+  isActivating: false,
 
   checkModelStatus: async () => {
     try {
@@ -120,6 +132,9 @@ export const useAiStore = create<AiStore>((set, get) => ({
 
       // Update status after successful download
       set({ modelStatus: { status: 'downloaded' } })
+
+      // Refresh downloaded models list
+      await get().getDownloadedModels()
     } catch (error) {
       set({
         error: (error as Error).toString(),
@@ -141,11 +156,17 @@ export const useAiStore = create<AiStore>((set, get) => ({
       // Use fallback init which works with or without model
       const modelLoaded = await invoke<boolean>('init_ai_fallback')
 
+      // Verify the actual status from backend
+      const actualStatus = await invoke<ModelStatus>('check_model_status')
+
       set({
-        modelStatus: { status: 'ready' },
-        isModelLoaded: modelLoaded,
+        modelStatus: actualStatus,
+        isModelLoaded: actualStatus.status === 'ready',
         isAiReady: true,  // AI is ready (either with model or fallback)
       })
+
+      // Refresh active model ID
+      await get().getActiveModelId()
 
       return modelLoaded
     } catch (error) {
@@ -176,6 +197,70 @@ export const useAiStore = create<AiStore>((set, get) => ({
     }
   },
 
+  getDownloadedModels: async () => {
+    try {
+      const models = await invoke<ModelOption[]>('get_downloaded_models')
+      set({ downloadedModels: models })
+    } catch (error) {
+      console.error('Failed to get downloaded models:', error)
+    }
+  },
+
+  getActiveModelId: async () => {
+    try {
+      const modelId = await invoke<string | null>('get_active_model_id')
+      set({ activeModelId: modelId })
+    } catch (error) {
+      console.error('Failed to get active model ID:', error)
+    }
+  },
+
+  deleteModel: async (modelId: string) => {
+    try {
+      set({ isDeleting: true, error: null })
+      await invoke('delete_model', { modelId })
+
+      // Refresh lists
+      await get().getDownloadedModels()
+      await get().getActiveModelId()
+      await get().checkModelStatus()
+
+      set({ isDeleting: false })
+    } catch (error) {
+      set({
+        error: (error as Error).toString(),
+        isDeleting: false,
+      })
+      throw error
+    }
+  },
+
+  activateModel: async (modelId: string) => {
+    try {
+      set({ isActivating: true, modelStatus: { status: 'loading' }, error: null })
+      await invoke('activate_model', { modelId })
+
+      // Verify the actual status from backend
+      const actualStatus = await invoke<ModelStatus>('check_model_status')
+
+      set({
+        activeModelId: modelId,
+        selectedModelId: modelId,
+        isActivating: false,
+        modelStatus: actualStatus,
+        isModelLoaded: actualStatus.status === 'ready',
+        isAiReady: actualStatus.status === 'ready',
+      })
+    } catch (error) {
+      set({
+        error: (error as Error).toString(),
+        isActivating: false,
+        modelStatus: { status: 'error', message: (error as Error).toString() },
+      })
+      throw error
+    }
+  },
+
   setSelectedModel: (modelId: string) => {
     set({ selectedModelId: modelId })
   },
@@ -187,6 +272,9 @@ export const useAiStore = create<AiStore>((set, get) => ({
       isModelLoaded: false,
       isAiReady: false,
       error: null,
+      isDeleting: false,
+      isActivating: false,
     })
   },
 }))
+

@@ -104,9 +104,7 @@ impl ModelManager {
         } else {
             // Fallback to home directory
             let home = std::env::var("HOME").map_err(|_| anyhow!("HOME not set"))?;
-            Ok(PathBuf::from(home)
-                .join(".inboxed")
-                .join("models"))
+            Ok(PathBuf::from(home).join(".inboxed").join("models"))
         }
     }
 
@@ -217,6 +215,33 @@ impl ModelManager {
         get_available_models()
             .into_iter()
             .find(|m| m.id == model_id)
+    }
+
+    /// Get list of all downloaded models
+    pub fn get_downloaded_models(&self) -> Vec<ModelOption> {
+        get_available_models()
+            .into_iter()
+            .filter(|model| {
+                let path = self.get_model_path(&model.filename);
+                path.exists() && path.is_file()
+            })
+            .collect()
+    }
+
+    /// Delete a model file
+    pub fn delete_model(&self, model_id: &str) -> Result<()> {
+        let model = self
+            .get_model_by_id(model_id)
+            .ok_or_else(|| anyhow!("Unknown model: {}", model_id))?;
+
+        let path = self.get_model_path(&model.filename);
+
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+            Ok(())
+        } else {
+            Err(anyhow!("Model file not found: {}", model_id))
+        }
     }
 
     /// Download a specific model by ID

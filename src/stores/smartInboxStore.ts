@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import { useAiStore } from './aiStore'
 
 export interface EmailWithInsight {
   id: string
@@ -112,6 +113,18 @@ export const useSmartInboxStore = create<SmartInboxStore>((set, get) => ({
   startIndexing: async (maxEmails = 100) => {
     try {
       set({ error: null })
+
+      // Ensure AI is initialized before indexing to get proper summaries
+      const aiStore = useAiStore.getState()
+      if (!aiStore.isAiReady) {
+        console.log('[SmartInbox] Initializing AI before indexing...')
+        await aiStore.initAi()
+      }
+
+      // Double-check model status
+      await aiStore.checkModelStatus()
+      console.log('[SmartInbox] Model status:', aiStore.modelStatus)
+
       await invoke('start_email_indexing', { maxEmails })
     } catch (error) {
       set({ error: (error as Error).toString() })

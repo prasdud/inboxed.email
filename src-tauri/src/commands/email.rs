@@ -1,11 +1,33 @@
 use crate::auth::storage::get_tokens;
+use crate::db::EmailDatabase;
 use crate::email::{Email, EmailListItem, GmailClient};
+use std::sync::{Arc, Mutex};
+use tauri::State;
+
+type DbState = Arc<Mutex<Option<EmailDatabase>>>;
 
 #[tauri::command]
 pub async fn fetch_emails(
+    db: State<'_, DbState>,
     max_results: Option<u32>,
     query: Option<String>,
+    force_refresh: Option<bool>,
 ) -> Result<Vec<EmailListItem>, String> {
+    let should_refresh = force_refresh.unwrap_or(false);
+
+    // Try to get cached emails first if not forcing refresh
+    if !should_refresh {
+        let db_lock = db.lock().unwrap();
+        if let Some(database) = db_lock.as_ref() {
+            if let Ok(cached_emails) = database.get_cached_emails(max_results.unwrap_or(50) as i64)
+            {
+                if !cached_emails.is_empty() {
+                    return Ok(cached_emails);
+                }
+            }
+        }
+    }
+
     // Get access token
     let tokens = get_tokens().map_err(|e| format!("Not authenticated: {}", e))?;
 
@@ -25,6 +47,17 @@ pub async fn fetch_emails(
         match client.get_message(&msg_id.id).await {
             Ok(gmail_msg) => {
                 let email = client.parse_email(gmail_msg);
+
+                // Store in database cache
+                {
+                    let db_lock = db.lock().unwrap();
+                    if let Some(database) = db_lock.as_ref() {
+                        if let Err(e) = database.store_email(&email) {
+                            eprintln!("Failed to cache email {}: {}", email.id, e);
+                        }
+                    }
+                }
+
                 emails.push(GmailClient::to_list_item(&email));
             }
             Err(e) => {

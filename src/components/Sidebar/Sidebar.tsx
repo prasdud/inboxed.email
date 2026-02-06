@@ -19,11 +19,12 @@ interface SidebarProps {
   onFolderSelect: (folderId: string) => void
   onCompose: () => void
   onOpenModelSettings: () => void
+  onOpenStorageSettings: () => void
 }
 
-export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings }: SidebarProps) {
+export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings, onOpenStorageSettings }: SidebarProps) {
   const [activeFolder, setActiveFolder] = useState('inbox')
-  const { modelStatus, downloadProgress, isModelLoaded, isAiReady } = useAiStore()
+  const { modelStatus, downloadProgress, isModelLoaded } = useAiStore()
 
   const handleFolderClick = (folderId: string) => {
     setActiveFolder(folderId)
@@ -60,7 +61,7 @@ export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings
   }
 
   return (
-    <div className="w-64 bg-background border-r-[2px] border-foreground flex flex-col">
+    <div className="w-56 lg:w-64 flex-shrink-0 bg-background border-r-[2px] border-foreground flex flex-col">
       {/* Header */}
       <div className="p-6 border-b-[2px] border-foreground">
         <h1 className="font-display text-3xl tracking-tighter">Inboxed</h1>
@@ -81,25 +82,23 @@ export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings
 
       {/* Navigation */}
       <nav className="flex-1 py-8">
-        {folders.map((folder, index) => (
+        {folders.map((folder) => (
           <button
             key={folder.id}
             onClick={() => handleFolderClick(folder.id)}
-            className={`group w-full text-left px-6 py-4 border-l-[4px] transition-all duration-100 focus-visible:outline focus-visible:outline-3 focus-visible:outline-foreground focus-visible:outline-offset-[-3px] ${
-              activeFolder === folder.id
-                ? 'border-foreground bg-foreground text-background'
-                : 'border-transparent hover:border-foreground hover:bg-muted'
-            }`}
+            className={`group w-full text-left px-6 py-4 border-l-[4px] transition-all duration-100 focus-visible:outline focus-visible:outline-3 focus-visible:outline-foreground focus-visible:outline-offset-[-3px] ${activeFolder === folder.id
+              ? 'border-foreground bg-foreground text-background'
+              : 'border-transparent hover:border-foreground hover:bg-muted'
+              }`}
           >
             <div className="flex items-center justify-between">
               <span className="font-serif text-lg">{folder.name}</span>
               {folder.count !== undefined && folder.count > 0 && (
                 <span
-                  className={`font-mono text-xs px-2 py-1 border ${
-                    activeFolder === folder.id
-                      ? 'border-background text-background'
-                      : 'border-foreground'
-                  }`}
+                  className={`font-mono text-xs px-2 py-1 border ${activeFolder === folder.id
+                    ? 'border-background text-background'
+                    : 'border-foreground'
+                    }`}
                 >
                   {folder.count}
                 </span>
@@ -109,8 +108,9 @@ export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings
         ))}
       </nav>
 
-      {/* AI Status & Settings */}
-      <div className="p-4 border-t-[2px] border-foreground">
+      {/* Settings Section */}
+      <div className="p-4 border-t-[2px] border-foreground space-y-2">
+        {/* AI Model Settings */}
         <button
           onClick={onOpenModelSettings}
           className="w-full p-3 border-[2px] border-borderLight hover:border-foreground transition-all group"
@@ -133,6 +133,40 @@ export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings
             )}
           </div>
         </button>
+
+        {/* Storage Settings */}
+        <button
+          onClick={onOpenStorageSettings}
+          className="w-full p-3 border-[2px] border-borderLight hover:border-foreground transition-all group text-left"
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-xs uppercase tracking-widest">
+              Storage & Cache
+            </span>
+            <svg
+              className="w-4 h-4 text-mutedForeground group-hover:text-foreground transition-colors"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7c-2 0-3 1-3 3z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 7h16M8 4v3m8-3v3"
+              />
+            </svg>
+          </div>
+          <p className="font-serif text-sm text-mutedForeground mt-1">
+            Manage cached emails & media
+          </p>
+        </button>
       </div>
 
       {/* Footer */}
@@ -144,3 +178,4 @@ export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings
     </div>
   )
 }
+

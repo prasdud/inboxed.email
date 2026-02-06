@@ -1,12 +1,12 @@
-use rusqlite::{Connection, Result, params};
+use anyhow::{Context, Result as AnyhowResult};
+use chrono::Utc;
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use anyhow::{Context, Result as AnyhowResult};
-use chrono::Utc;
 
-use crate::email::types::Email;
 use super::schema::create_tables;
+use crate::email::types::Email;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailInsight {
@@ -58,11 +58,9 @@ pub struct EmailDatabase {
 
 impl EmailDatabase {
     pub fn new(db_path: PathBuf) -> AnyhowResult<Self> {
-        let conn = Connection::open(db_path)
-            .context("Failed to open database")?;
+        let conn = Connection::open(db_path).context("Failed to open database")?;
 
-        create_tables(&conn)
-            .context("Failed to create database tables")?;
+        create_tables(&conn).context("Failed to create database tables")?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -87,7 +85,7 @@ impl EmailDatabase {
                 &email.from,
                 &email.from_email,
                 serde_json::to_string(&email.to)?,
-                &email.date,
+                email.date_timestamp, // Use the i64 timestamp instead of String
                 &email.snippet,
                 &email.body_html,
                 &email.body_plain,
@@ -132,7 +130,11 @@ impl EmailDatabase {
     }
 
     // Get emails sorted by priority
-    pub fn get_emails_by_priority(&self, limit: i64, offset: i64) -> AnyhowResult<Vec<EmailWithInsight>> {
+    pub fn get_emails_by_priority(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> AnyhowResult<Vec<EmailWithInsight>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
@@ -144,34 +146,40 @@ impl EmailDatabase {
              FROM emails e
              LEFT JOIN email_insights i ON e.id = i.email_id
              ORDER BY COALESCE(i.priority_score, 0.5) DESC, e.date DESC
-             LIMIT ?1 OFFSET ?2"
+             LIMIT ?1 OFFSET ?2",
         )?;
 
-        let emails = stmt.query_map(params![limit, offset], |row| {
-            Ok(EmailWithInsight {
-                id: row.get(0)?,
-                thread_id: row.get(1)?,
-                subject: row.get(2)?,
-                from_name: row.get(3)?,
-                from_email: row.get(4)?,
-                to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
-                date: row.get(6)?,
-                snippet: row.get(7)?,
-                is_read: row.get::<_, i32>(8)? != 0,
-                is_starred: row.get::<_, i32>(9)? != 0,
-                has_attachments: row.get::<_, i32>(10)? != 0,
-                priority: row.get(11)?,
-                priority_score: row.get(12)?,
-                category: row.get(13)?,
-                summary: row.get(14)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let emails = stmt
+            .query_map(params![limit, offset], |row| {
+                Ok(EmailWithInsight {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    from_name: row.get(3)?,
+                    from_email: row.get(4)?,
+                    to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+                    date: row.get(6)?,
+                    snippet: row.get(7)?,
+                    is_read: row.get::<_, i32>(8)? != 0,
+                    is_starred: row.get::<_, i32>(9)? != 0,
+                    has_attachments: row.get::<_, i32>(10)? != 0,
+                    priority: row.get(11)?,
+                    priority_score: row.get(12)?,
+                    category: row.get(13)?,
+                    summary: row.get(14)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(emails)
     }
 
     // Get emails by category
-    pub fn get_emails_by_category(&self, category: &str, limit: i64) -> AnyhowResult<Vec<EmailWithInsight>> {
+    pub fn get_emails_by_category(
+        &self,
+        category: &str,
+        limit: i64,
+    ) -> AnyhowResult<Vec<EmailWithInsight>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
@@ -182,28 +190,30 @@ impl EmailDatabase {
              INNER JOIN email_insights i ON e.id = i.email_id
              WHERE i.category = ?1
              ORDER BY i.priority_score DESC, e.date DESC
-             LIMIT ?2"
+             LIMIT ?2",
         )?;
 
-        let emails = stmt.query_map(params![category, limit], |row| {
-            Ok(EmailWithInsight {
-                id: row.get(0)?,
-                thread_id: row.get(1)?,
-                subject: row.get(2)?,
-                from_name: row.get(3)?,
-                from_email: row.get(4)?,
-                to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
-                date: row.get(6)?,
-                snippet: row.get(7)?,
-                is_read: row.get::<_, i32>(8)? != 0,
-                is_starred: row.get::<_, i32>(9)? != 0,
-                has_attachments: row.get::<_, i32>(10)? != 0,
-                priority: row.get(11)?,
-                priority_score: row.get(12)?,
-                category: row.get(13)?,
-                summary: row.get(14)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let emails = stmt
+            .query_map(params![category, limit], |row| {
+                Ok(EmailWithInsight {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    from_name: row.get(3)?,
+                    from_email: row.get(4)?,
+                    to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+                    date: row.get(6)?,
+                    snippet: row.get(7)?,
+                    is_read: row.get::<_, i32>(8)? != 0,
+                    is_starred: row.get::<_, i32>(9)? != 0,
+                    has_attachments: row.get::<_, i32>(10)? != 0,
+                    priority: row.get(11)?,
+                    priority_score: row.get(12)?,
+                    category: row.get(13)?,
+                    summary: row.get(14)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(emails)
     }
@@ -211,7 +221,12 @@ impl EmailDatabase {
     // Get emails from today
     pub fn get_emails_from_today(&self) -> AnyhowResult<Vec<EmailWithInsight>> {
         let conn = self.conn.lock().unwrap();
-        let today_start = Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+        let today_start = Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
 
         let mut stmt = conn.prepare(
             "SELECT e.id, e.thread_id, e.subject, e.from_name, e.from_email, e.to_emails,
@@ -222,28 +237,30 @@ impl EmailDatabase {
              FROM emails e
              LEFT JOIN email_insights i ON e.id = i.email_id
              WHERE e.date >= ?1
-             ORDER BY e.date DESC"
+             ORDER BY e.date DESC",
         )?;
 
-        let emails = stmt.query_map(params![today_start], |row| {
-            Ok(EmailWithInsight {
-                id: row.get(0)?,
-                thread_id: row.get(1)?,
-                subject: row.get(2)?,
-                from_name: row.get(3)?,
-                from_email: row.get(4)?,
-                to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
-                date: row.get(6)?,
-                snippet: row.get(7)?,
-                is_read: row.get::<_, i32>(8)? != 0,
-                is_starred: row.get::<_, i32>(9)? != 0,
-                has_attachments: row.get::<_, i32>(10)? != 0,
-                priority: row.get(11)?,
-                priority_score: row.get(12)?,
-                category: row.get(13)?,
-                summary: row.get(14)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let emails = stmt
+            .query_map(params![today_start], |row| {
+                Ok(EmailWithInsight {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    from_name: row.get(3)?,
+                    from_email: row.get(4)?,
+                    to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+                    date: row.get(6)?,
+                    snippet: row.get(7)?,
+                    is_read: row.get::<_, i32>(8)? != 0,
+                    is_starred: row.get::<_, i32>(9)? != 0,
+                    has_attachments: row.get::<_, i32>(10)? != 0,
+                    priority: row.get(11)?,
+                    priority_score: row.get(12)?,
+                    category: row.get(13)?,
+                    summary: row.get(14)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(emails)
     }
@@ -264,28 +281,30 @@ impl EmailDatabase {
              WHERE e.subject LIKE ?1 OR e.from_name LIKE ?1 OR e.snippet LIKE ?1
                    OR COALESCE(i.summary, '') LIKE ?1
              ORDER BY e.date DESC
-             LIMIT ?2"
+             LIMIT ?2",
         )?;
 
-        let emails = stmt.query_map(params![&search_pattern, limit], |row| {
-            Ok(EmailWithInsight {
-                id: row.get(0)?,
-                thread_id: row.get(1)?,
-                subject: row.get(2)?,
-                from_name: row.get(3)?,
-                from_email: row.get(4)?,
-                to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
-                date: row.get(6)?,
-                snippet: row.get(7)?,
-                is_read: row.get::<_, i32>(8)? != 0,
-                is_starred: row.get::<_, i32>(9)? != 0,
-                has_attachments: row.get::<_, i32>(10)? != 0,
-                priority: row.get(11)?,
-                priority_score: row.get(12)?,
-                category: row.get(13)?,
-                summary: row.get(14)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let emails = stmt
+            .query_map(params![&search_pattern, limit], |row| {
+                Ok(EmailWithInsight {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    from_name: row.get(3)?,
+                    from_email: row.get(4)?,
+                    to_emails: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+                    date: row.get(6)?,
+                    snippet: row.get(7)?,
+                    is_read: row.get::<_, i32>(8)? != 0,
+                    is_starred: row.get::<_, i32>(9)? != 0,
+                    has_attachments: row.get::<_, i32>(10)? != 0,
+                    priority: row.get(11)?,
+                    priority_score: row.get(12)?,
+                    category: row.get(13)?,
+                    summary: row.get(14)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(emails)
     }
@@ -343,7 +362,7 @@ impl EmailDatabase {
 
         let mut stmt = conn.prepare(
             "SELECT is_indexing, total_emails, processed_emails, last_indexed_at, error_message
-             FROM indexing_status WHERE id = 1"
+             FROM indexing_status WHERE id = 1",
         )?;
 
         let status = stmt.query_row([], |row| {
@@ -369,7 +388,109 @@ impl EmailDatabase {
     // Get count of indexed emails
     pub fn get_indexed_count(&self) -> AnyhowResult<i64> {
         let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM email_insights", [], |row| row.get(0))?;
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM email_insights", [], |row| row.get(0))?;
         Ok(count)
+    }
+
+    // Clear all emails and insights from the database
+    pub fn clear_all_emails(&self) -> AnyhowResult<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Delete all email insights first (due to foreign key)
+        conn.execute("DELETE FROM email_insights", [])?;
+
+        // Delete all emails
+        conn.execute("DELETE FROM emails", [])?;
+
+        // Reset indexing status
+        conn.execute(
+            "UPDATE indexing_status SET is_indexing = 0, total_emails = 0, processed_emails = 0, last_indexed_at = NULL, error_message = NULL WHERE id = 1",
+            [],
+        )?;
+
+        Ok(())
+    }
+
+    // Get email by ID from cache
+    pub fn get_email_by_id(
+        &self,
+        email_id: &str,
+    ) -> AnyhowResult<Option<crate::email::types::Email>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT id, thread_id, subject, from_name, from_email, to_emails,
+                    date, snippet, body_html, body_plain, is_read, is_starred,
+                    has_attachments, labels
+             FROM emails WHERE id = ?1",
+        )?;
+
+        let email = stmt
+            .query_row([email_id], |row| {
+                let to_emails_json: String = row.get(5)?;
+                let labels_json: String = row.get(13)?;
+                let date_timestamp: i64 = row.get(6)?;
+
+                Ok(crate::email::types::Email {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    from: row.get(3)?,
+                    from_email: row.get(4)?,
+                    to: serde_json::from_str(&to_emails_json).unwrap_or_default(),
+                    date: chrono::DateTime::from_timestamp(date_timestamp, 0)
+                        .map(|dt| dt.format("%a, %d %b %Y %H:%M:%S %z").to_string())
+                        .unwrap_or_default(),
+                    date_timestamp,
+                    snippet: row.get(7)?,
+                    body_html: row.get(8)?,
+                    body_plain: row.get(9)?,
+                    is_read: row.get::<_, i32>(10)? != 0,
+                    is_starred: row.get::<_, i32>(11)? != 0,
+                    has_attachments: row.get::<_, i32>(12)? != 0,
+                    labels: serde_json::from_str(&labels_json).unwrap_or_default(),
+                })
+            })
+            .optional()?;
+
+        Ok(email)
+    }
+
+    // Get all cached emails as EmailListItem
+    pub fn get_cached_emails(
+        &self,
+        limit: i64,
+    ) -> AnyhowResult<Vec<crate::email::types::EmailListItem>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT id, thread_id, subject, from_name, from_email, date, snippet,
+                    is_read, is_starred, has_attachments
+             FROM emails ORDER BY date DESC LIMIT ?1",
+        )?;
+
+        let emails = stmt
+            .query_map([limit], |row| {
+                let date_timestamp: i64 = row.get(5)?;
+
+                Ok(crate::email::types::EmailListItem {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    from: row.get(3)?,
+                    from_email: row.get(4)?,
+                    date: chrono::DateTime::from_timestamp(date_timestamp, 0)
+                        .map(|dt| dt.format("%a, %d %b %Y %H:%M:%S %z").to_string())
+                        .unwrap_or_default(),
+                    snippet: row.get(6)?,
+                    is_read: row.get::<_, i32>(7)? != 0,
+                    is_starred: row.get::<_, i32>(8)? != 0,
+                    has_attachments: row.get::<_, i32>(9)? != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(emails)
     }
 }

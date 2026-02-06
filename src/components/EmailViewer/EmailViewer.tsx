@@ -13,7 +13,7 @@ interface EmailSummary {
 
 export default function EmailViewer() {
   const { selectedEmail, fetchEmails } = useEmailStore()
-  const { isModelLoaded, isAiReady, modelStatus, downloadProgress, initAi } = useAiStore()
+  const { isModelLoaded, isAiReady, modelStatus, downloadProgress } = useAiStore()
   const [showCompose, setShowCompose] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [summary, setSummary] = useState<EmailSummary | null>(null)
@@ -23,10 +23,6 @@ export default function EmailViewer() {
   const [isStreaming, setIsStreaming] = useState(false)
   const unlistenRef = useRef<UnlistenFn | null>(null)
 
-  // Initialize AI on mount
-  useEffect(() => {
-    initAi().catch(console.error)
-  }, [initAi])
 
   // Set up streaming listener
   useEffect(() => {
@@ -197,7 +193,7 @@ export default function EmailViewer() {
     <>
       <div className="flex-1 flex flex-col overflow-hidden bg-background">
         {/* Actions Bar */}
-        <div className="px-12 py-4 border-b border-borderLight flex items-center gap-3">
+        <div className="px-6 lg:px-12 py-4 border-b border-borderLight flex items-center gap-3 flex-wrap">
           <button
             onClick={handleReply}
             disabled={!!actionLoading}
@@ -278,9 +274,9 @@ export default function EmailViewer() {
         </div>
 
         {/* Header */}
-        <div className="border-b-[2px] border-foreground px-12 py-8">
+        <div className="border-b-[2px] border-foreground px-6 lg:px-12 py-8">
         {/* Subject */}
-        <h1 className="font-display text-4xl md:text-5xl leading-tight tracking-tight mb-8">
+        <h1 className="font-display text-3xl lg:text-5xl leading-tight tracking-tight mb-8">
           {selectedEmail.subject}
         </h1>
 
@@ -309,7 +305,7 @@ export default function EmailViewer() {
       {/* AI Summary Panel */}
       {showSummary && (displaySummary || loadingSummary) && (
         <div className="border-b-[2px] border-foreground bg-muted">
-          <div className="px-12 py-8">
+          <div className="px-6 lg:px-12 py-8">
             {/* Priority Badge */}
             {summary?.priority && (
               <div className="mb-6">
@@ -378,7 +374,7 @@ export default function EmailViewer() {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
-        <article className="max-w-3xl mx-auto px-12 py-12">
+        <article className="max-w-3xl mx-auto px-6 lg:px-12 py-12">
           {selectedEmail.body_html ? (
             <div
               className="font-serif text-lg leading-relaxed email-content"

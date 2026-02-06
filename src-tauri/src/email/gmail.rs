@@ -54,11 +54,7 @@ impl GmailClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "Gmail API error ({}): {}",
-                status,
-                text
-            ));
+            return Err(anyhow::anyhow!("Gmail API error ({}): {}", status, text));
         }
 
         response
@@ -83,11 +79,7 @@ impl GmailClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "Gmail API error ({}): {}",
-                status,
-                text
-            ));
+            return Err(anyhow::anyhow!("Gmail API error ({}): {}", status, text));
         }
 
         response
@@ -105,10 +97,19 @@ impl GmailClient {
             .cloned()
             .unwrap_or_default();
 
-        let subject = Self::get_header(&headers, "Subject").unwrap_or_else(|| "(No Subject)".to_string());
+        let subject =
+            Self::get_header(&headers, "Subject").unwrap_or_else(|| "(No Subject)".to_string());
         let from = Self::get_header(&headers, "From").unwrap_or_else(|| "Unknown".to_string());
         let to_str = Self::get_header(&headers, "To").unwrap_or_default();
         let date = Self::get_header(&headers, "Date").unwrap_or_default();
+
+        // Parse internal_date (Unix timestamp in milliseconds) to seconds
+        let date_timestamp = msg
+            .internal_date
+            .as_ref()
+            .and_then(|d| d.parse::<i64>().ok())
+            .map(|ms| ms / 1000) // Convert milliseconds to seconds
+            .unwrap_or_else(|| chrono::Utc::now().timestamp());
 
         let from_email = Self::extract_email(&from);
         let to = to_str
@@ -136,6 +137,7 @@ impl GmailClient {
             from_email,
             to,
             date,
+            date_timestamp,
             snippet: msg.snippet,
             body_html,
             body_plain,
@@ -315,7 +317,11 @@ impl GmailClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Failed to send email ({}): {}", status, text));
+            return Err(anyhow::anyhow!(
+                "Failed to send email ({}): {}",
+                status,
+                text
+            ));
         }
 
         let result: serde_json::Value = response.json().await?;
@@ -346,7 +352,11 @@ impl GmailClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Failed to modify labels ({}): {}", status, text));
+            return Err(anyhow::anyhow!(
+                "Failed to modify labels ({}): {}",
+                status,
+                text
+            ));
         }
 
         Ok(())
@@ -367,7 +377,11 @@ impl GmailClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Failed to trash email ({}): {}", status, text));
+            return Err(anyhow::anyhow!(
+                "Failed to trash email ({}): {}",
+                status,
+                text
+            ));
         }
 
         Ok(())
@@ -388,7 +402,11 @@ impl GmailClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Failed to delete email ({}): {}", status, text));
+            return Err(anyhow::anyhow!(
+                "Failed to delete email ({}): {}",
+                status,
+                text
+            ));
         }
 
         Ok(())

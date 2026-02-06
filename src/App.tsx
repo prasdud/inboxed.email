@@ -133,7 +133,7 @@ function App() {
           ) : (
             <div className="flex-1 flex overflow-hidden">
               {/* Email List */}
-              <div className="w-[32rem] border-r-[2px] border-foreground flex flex-col">
+              <div className="w-[40%] min-w-[280px] max-w-[32rem] flex-shrink-0 border-r-[2px] border-foreground flex flex-col">
                 <EmailList />
               </div>
 

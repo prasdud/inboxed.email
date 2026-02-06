@@ -1,11 +1,11 @@
 mod auth;
 mod commands;
+mod db;
 mod email;
 mod llm;
-mod db;
 
-use std::sync::{Arc, Mutex};
 use directories::ProjectDirs;
+use std::sync::{Arc, Mutex};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,8 +14,8 @@ pub fn run() {
     let _ = dotenvy::dotenv();
 
     // Initialize database
-    let project_dirs = ProjectDirs::from("com", "inboxed", "inboxed")
-        .expect("Failed to get project directory");
+    let project_dirs =
+        ProjectDirs::from("com", "inboxed", "inboxed").expect("Failed to get project directory");
     let data_dir = project_dirs.data_dir();
     std::fs::create_dir_all(data_dir).expect("Failed to create data directory");
     let db_path = data_dir.join("emails.db");
@@ -44,6 +44,7 @@ pub fn run() {
             commands::archive_email,
             // AI commands
             commands::check_model_status,
+            commands::is_model_loading,
             commands::download_model,
             commands::download_model_by_id,
             commands::init_ai,
@@ -55,6 +56,10 @@ pub fn run() {
             commands::get_model_info,
             commands::get_available_ai_models,
             commands::get_current_model_id,
+            commands::get_downloaded_models,
+            commands::delete_model,
+            commands::activate_model,
+            commands::get_active_model_id,
             // Database commands
             commands::init_database,
             commands::get_smart_inbox,
@@ -63,6 +68,30 @@ pub fn run() {
             commands::start_email_indexing,
             commands::search_smart_emails,
             commands::chat_query,
+            // Cache commands
+            commands::get_storage_info,
+            commands::get_cache_settings,
+            commands::save_cache_settings,
+            commands::clear_email_cache,
+            commands::clear_media_cache,
+            commands::clear_all_caches,
+            commands::cache_media_asset,
+            commands::get_cached_media_asset,
+            commands::get_cached_emails_count,
+            commands::has_cached_emails,
+            commands::clear_all_app_data,
+            commands::clear_ai_models,
+            // RAG commands
+            commands::init_rag,
+            commands::is_rag_ready,
+            commands::get_embedding_status,
+            commands::embed_email,
+            commands::embed_all_emails,
+            commands::search_emails_semantic,
+            commands::find_similar_emails,
+            commands::get_embedded_count,
+            commands::clear_embeddings,
+            commands::chat_with_context,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

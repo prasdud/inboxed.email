@@ -10,6 +10,7 @@ lazy_static::lazy_static! {
     pub static ref SUMMARIZER: Mutex<Option<Summarizer>> = Mutex::new(None);
     static ref MODEL_MANAGER: Mutex<Option<ModelManager>> = Mutex::new(None);
     static ref CURRENT_MODEL_ID: Mutex<Option<String>> = Mutex::new(None);
+    static ref MODEL_LOADING: Mutex<bool> = Mutex::new(false);
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,6 +71,15 @@ pub async fn get_available_ai_models() -> Result<Vec<ModelOption>, String> {
 pub async fn check_model_status() -> Result<ModelStatusResponse, String> {
     ensure_model_manager()?;
 
+    // Check if loading is in progress
+    {
+        let loading_guard = MODEL_LOADING.lock().unwrap();
+        if *loading_guard {
+            println!("[AI] check_model_status: Loading in progress");
+            return Ok(ModelStatusResponse::Loading);
+        }
+    }
+
     let guard = MODEL_MANAGER.lock().unwrap();
     let manager = guard.as_ref().ok_or("Model manager not initialized")?;
 
@@ -79,13 +89,23 @@ pub async fn check_model_status() -> Result<ModelStatusResponse, String> {
         let summarizer_guard = SUMMARIZER.lock().unwrap();
         if let Some(summarizer) = summarizer_guard.as_ref() {
             if summarizer.is_model_loaded() {
+                println!("[AI] check_model_status: Ready");
                 return Ok(ModelStatusResponse::Ready);
             }
         }
+        println!("[AI] check_model_status: Downloaded but not loaded");
         Ok(ModelStatusResponse::Downloaded)
     } else {
+        println!("[AI] check_model_status: Not downloaded");
         Ok(ModelStatusResponse::NotDownloaded)
     }
+}
+
+/// Check if the model is currently loading
+#[tauri::command]
+pub async fn is_model_loading() -> Result<bool, String> {
+    let loading_guard = MODEL_LOADING.lock().unwrap();
+    Ok(*loading_guard)
 }
 
 /// Download the default AI model from HuggingFace
@@ -122,8 +142,7 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
             let mut model_id_guard = CURRENT_MODEL_ID.lock().unwrap();
             *model_id_guard = Some("lfm2.5-1.2b-q4".to_string());
 
-            app.emit("model:complete", ())
-                .map_err(|e| e.to_string())?;
+            app.emit("model:complete", ()).map_err(|e| e.to_string())?;
             Ok(())
         }
         Err(e) => {
@@ -168,8 +187,7 @@ pub async fn download_model_by_id(app: AppHandle, model_id: String) -> Result<()
             let mut model_id_guard = CURRENT_MODEL_ID.lock().unwrap();
             *model_id_guard = Some(model_id);
 
-            app.emit("model:complete", ())
-                .map_err(|e| e.to_string())?;
+            app.emit("model:complete", ()).map_err(|e| e.to_string())?;
             Ok(())
         }
         Err(e) => {
@@ -183,6 +201,53 @@ pub async fn download_model_by_id(app: AppHandle, model_id: String) -> Result<()
 /// Initialize the AI system (load model into memory)
 #[tauri::command]
 pub async fn init_ai() -> Result<(), String> {
+    // Check if model is already loaded - skip reloading
+    {
+        let guard = SUMMARIZER.lock().unwrap();
+        if let Some(summarizer) = guard.as_ref() {
+            if summarizer.is_model_loaded() {
+                println!("[AI] Model already loaded, skipping init");
+                return Ok(());
+            }
+        }
+    }
+
+    // Check if loading is already in progress
+    let is_loading = {
+        let loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard
+    };
+
+    if is_loading {
+        println!("[AI] Model loading already in progress, waiting...");
+        // Wait for loading to complete
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let loading = {
+                let guard = MODEL_LOADING.lock().unwrap();
+                *guard
+            };
+            if !loading {
+                break;
+            }
+        }
+        // Check if model is now loaded
+        let guard = SUMMARIZER.lock().unwrap();
+        if let Some(summarizer) = guard.as_ref() {
+            if summarizer.is_model_loaded() {
+                println!("[AI] Model loaded by another call");
+                return Ok(());
+            }
+        }
+        return Err("Model loading failed in another call".to_string());
+    }
+
+    // Set loading flag
+    {
+        let mut loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard = true;
+    }
+
     ensure_model_manager()?;
 
     // Get model path (try any downloaded model)
@@ -190,14 +255,23 @@ pub async fn init_ai() -> Result<(), String> {
         let guard = MODEL_MANAGER.lock().unwrap();
         let manager = guard.as_ref().ok_or("Model manager not initialized")?;
 
-        manager
-            .find_any_downloaded_model()
-            .map(|(_, path)| path)
-            .ok_or_else(|| "No model downloaded. Please download a model first.".to_string())?
+        match manager.find_any_downloaded_model() {
+            Some((model, path)) => {
+                println!("[AI] Found downloaded model: {}", model.id);
+                path
+            }
+            None => {
+                let mut loading_guard = MODEL_LOADING.lock().unwrap();
+                *loading_guard = false;
+                return Err("No model downloaded. Please download a model first.".to_string());
+            }
+        }
     };
 
+    println!("[AI] Loading model from: {:?}", model_path);
+
     // Load model in blocking task
-    tokio::task::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || {
         let mut summarizer = Summarizer::new().map_err(|e| e.to_string())?;
         summarizer
             .load_model(&model_path)
@@ -205,27 +279,86 @@ pub async fn init_ai() -> Result<(), String> {
 
         let mut guard = SUMMARIZER.lock().unwrap();
         *guard = Some(summarizer);
+        println!("[AI] Model loaded successfully");
         Ok::<(), String>(())
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| e.to_string())?;
 
-    Ok(())
+    // Clear loading flag
+    {
+        let mut loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard = false;
+    }
+
+    result
 }
 
 /// Initialize AI with fallback (works even without model downloaded)
 #[tauri::command]
 pub async fn init_ai_fallback() -> Result<bool, String> {
+    // Check if model is already loaded - skip reloading
+    {
+        let guard = SUMMARIZER.lock().unwrap();
+        if let Some(summarizer) = guard.as_ref() {
+            if summarizer.is_model_loaded() {
+                println!("[AI] Model already loaded (fallback check)");
+                return Ok(true); // Model already loaded
+            }
+        }
+    }
+
+    // Check if loading is already in progress
+    let is_loading = {
+        let loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard
+    };
+
+    if is_loading {
+        println!("[AI] Model loading already in progress (fallback), waiting...");
+        // Wait for loading to complete
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let loading = {
+                let guard = MODEL_LOADING.lock().unwrap();
+                *guard
+            };
+            if !loading {
+                break;
+            }
+        }
+        // Check if model is now loaded
+        let guard = SUMMARIZER.lock().unwrap();
+        if let Some(summarizer) = guard.as_ref() {
+            if summarizer.is_model_loaded() {
+                println!("[AI] Model loaded by another call (fallback)");
+                return Ok(true);
+            }
+        }
+        // Return false to indicate fallback mode
+        return Ok(false);
+    }
+
+    // Set loading flag
+    {
+        let mut loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard = true;
+    }
+
     ensure_model_manager()?;
 
     // Try to find any downloaded model
     let model_path = {
         let guard = MODEL_MANAGER.lock().unwrap();
         let manager = guard.as_ref().ok_or("Model manager not initialized")?;
-        manager.find_any_downloaded_model().map(|(_, path)| path)
+        manager.find_any_downloaded_model().map(|(model, path)| {
+            println!("[AI] Found downloaded model for fallback init: {}", model.id);
+            path
+        })
     };
 
     if let Some(path) = model_path {
+        println!("[AI] Loading model in fallback mode from: {:?}", path);
         // Load model in blocking task
         let result = tokio::task::spawn_blocking(move || {
             let mut summarizer = Summarizer::new().map_err(|e| e.to_string())?;
@@ -233,17 +366,32 @@ pub async fn init_ai_fallback() -> Result<bool, String> {
 
             let mut guard = SUMMARIZER.lock().unwrap();
             *guard = Some(summarizer);
+            println!("[AI] Model loaded successfully in fallback mode");
             Ok::<bool, String>(true)
         })
         .await
         .map_err(|e| e.to_string())?;
 
+        // Clear loading flag
+        {
+            let mut loading_guard = MODEL_LOADING.lock().unwrap();
+            *loading_guard = false;
+        }
+
         result
     } else {
-        // No model downloaded, use fallback summarizer
+        // No model downloaded, use fallback summarizer (no LLM)
+        println!("[AI] No model downloaded, using keyword-based fallback");
         let summarizer = Summarizer::new().map_err(|e| e.to_string())?;
         let mut guard = SUMMARIZER.lock().unwrap();
         *guard = Some(summarizer);
+
+        // Clear loading flag
+        {
+            let mut loading_guard = MODEL_LOADING.lock().unwrap();
+            *loading_guard = false;
+        }
+
         Ok(false) // Model not loaded, using fallback
     }
 }
@@ -379,4 +527,143 @@ pub struct ModelInfo {
     pub repo: String,
     pub filename: String,
     pub size_mb: u32,
+}
+
+/// Get list of downloaded models
+#[tauri::command]
+pub async fn get_downloaded_models() -> Result<Vec<ModelOption>, String> {
+    ensure_model_manager()?;
+
+    let guard = MODEL_MANAGER.lock().unwrap();
+    let manager = guard.as_ref().ok_or("Model manager not initialized")?;
+
+    Ok(manager.get_downloaded_models())
+}
+
+/// Delete a model by ID
+#[tauri::command]
+pub async fn delete_model(model_id: String) -> Result<(), String> {
+    ensure_model_manager()?;
+
+    // Check if this is the currently active model
+    {
+        let current_guard = CURRENT_MODEL_ID.lock().unwrap();
+        if let Some(ref current_id) = *current_guard {
+            if current_id == &model_id {
+                // Unload the model first
+                let mut summarizer_guard = SUMMARIZER.lock().unwrap();
+                *summarizer_guard = None;
+            }
+        }
+    }
+
+    // Delete the model file
+    let guard = MODEL_MANAGER.lock().unwrap();
+    let manager = guard.as_ref().ok_or("Model manager not initialized")?;
+    manager.delete_model(&model_id).map_err(|e| e.to_string())?;
+
+    // Clear current model ID if it was the deleted one
+    {
+        let mut current_guard = CURRENT_MODEL_ID.lock().unwrap();
+        if let Some(ref current_id) = *current_guard {
+            if current_id == &model_id {
+                *current_guard = None;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Activate a specific model by ID (load it into memory)
+#[tauri::command]
+pub async fn activate_model(model_id: String) -> Result<(), String> {
+    println!("[AI] Activating model: {}", model_id);
+
+    // Check if loading is already in progress
+    let is_loading = {
+        let loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard
+    };
+
+    if is_loading {
+        println!("[AI] Model loading already in progress, waiting before activating...");
+        // Wait for loading to complete
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let loading = {
+                let guard = MODEL_LOADING.lock().unwrap();
+                *guard
+            };
+            if !loading {
+                break;
+            }
+        }
+    }
+
+    // Now acquire the loading flag for ourselves
+    {
+        let mut loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard = true;
+    }
+
+    ensure_model_manager()?;
+
+    // Get model info and path
+    let model_path = {
+        let guard = MODEL_MANAGER.lock().unwrap();
+        let manager = guard.as_ref().ok_or("Model manager not initialized")?;
+
+        let model = manager
+            .get_model_by_id(&model_id)
+            .ok_or_else(|| format!("Unknown model: {}", model_id))?;
+
+        let path = manager.get_model_path(&model.filename);
+        if !path.exists() {
+            let mut loading_guard = MODEL_LOADING.lock().unwrap();
+            *loading_guard = false;
+            return Err(format!("Model not downloaded: {}", model_id));
+        }
+
+        println!("[AI] Model path: {:?}", path);
+        path
+    };
+
+    let model_id_clone = model_id.clone();
+
+    // Load model in blocking task
+    let result = tokio::task::spawn_blocking(move || {
+        println!("[AI] Starting model load in blocking task...");
+        let mut summarizer = Summarizer::new().map_err(|e| e.to_string())?;
+        summarizer
+            .load_model(&model_path)
+            .map_err(|e| e.to_string())?;
+
+        let mut guard = SUMMARIZER.lock().unwrap();
+        *guard = Some(summarizer);
+
+        // Update current model ID
+        let mut model_id_guard = CURRENT_MODEL_ID.lock().unwrap();
+        *model_id_guard = Some(model_id_clone);
+
+        println!("[AI] Model activated successfully");
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Clear loading flag
+    {
+        let mut loading_guard = MODEL_LOADING.lock().unwrap();
+        *loading_guard = false;
+    }
+
+    result
+}
+
+/// Get the active model ID (the one currently loaded)
+#[tauri::command]
+pub async fn get_active_model_id() -> Result<Option<String>, String> {
+    let guard = CURRENT_MODEL_ID.lock().unwrap();
+    Ok(guard.clone())
 }
