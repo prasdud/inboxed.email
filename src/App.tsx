@@ -5,19 +5,23 @@ import EmailList from './components/EmailList'
 import EmailViewer from './components/EmailViewer'
 import { ComposeModal } from './components/Compose'
 import { ModelDownload } from './components/Setup'
-import { ModelSettings } from './components/Settings'
+import { ModelSettings, StorageSettings } from './components/Settings'
+import { SmartInbox } from './components/SmartInbox'
 import { useAuthStore } from './stores/authStore'
 import { useAiStore } from './stores/aiStore'
 
 type AppState = 'loading' | 'login' | 'setup' | 'ready'
+type ViewMode = 'smart' | 'classic'
 
 function App() {
   const [activeFolder, setActiveFolder] = useState('inbox')
   const [showCompose, setShowCompose] = useState(false)
   const [showModelSettings, setShowModelSettings] = useState(false)
+  const [showStorageSettings, setShowStorageSettings] = useState(false)
   const [appState, setAppState] = useState<AppState>('loading')
+  const [viewMode, setViewMode] = useState<ViewMode>('smart')
   const { authenticated, loading: authLoading, checkAuth } = useAuthStore()
-  const { modelStatus, checkModelStatus } = useAiStore()
+  const { modelStatus, checkModelStatus, initAi } = useAiStore()
 
   useEffect(() => {
     checkAuth()
@@ -28,7 +32,16 @@ function App() {
     if (authenticated) {
       checkModelStatus()
     }
-  }, [authenticated, checkModelStatus])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated])
+
+  // Initialize AI system after model status is checked (works with or without downloaded model)
+  useEffect(() => {
+    if (authenticated && (modelStatus.status === 'downloaded' || modelStatus.status === 'not_downloaded')) {
+      initAi().catch(console.error)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, modelStatus.status])
 
   // Determine app state based on auth and model status
   useEffect(() => {
@@ -38,6 +51,9 @@ function App() {
       setAppState('login')
     } else if (modelStatus.status === 'not_downloaded') {
       setAppState('setup')
+    } else if (modelStatus.status === 'loading') {
+      // Show loading while model is being loaded
+      setAppState('loading')
     } else {
       setAppState('ready')
     }
@@ -80,21 +96,51 @@ function App() {
           onFolderSelect={setActiveFolder}
           onCompose={() => setShowCompose(true)}
           onOpenModelSettings={() => setShowModelSettings(true)}
+          onOpenStorageSettings={() => setShowStorageSettings(true)}
         />
 
-        <div className="flex-1 flex">
-          {/* Email List */}
-          <div className="w-[32rem] border-r-[2px] border-foreground flex flex-col">
-            <div className="px-6 py-5 border-b-[2px] border-foreground">
-              <h2 className="font-display text-2xl tracking-tight capitalize">
-                {activeFolder}
-              </h2>
+        <div className="flex-1 flex flex-col">
+          {/* View Toggle Header */}
+          <div className="px-6 py-3 border-b-[2px] border-foreground flex items-center justify-between">
+            <h2 className="font-display text-2xl tracking-tight capitalize">
+              {viewMode === 'smart' ? 'Smart Inbox' : activeFolder}
+            </h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setViewMode('smart')}
+                className={`px-4 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors ${viewMode === 'smart'
+                  ? 'bg-foreground text-background'
+                  : 'border-[2px] border-foreground hover:bg-foreground/10'
+                  }`}
+              >
+                Smart
+              </button>
+              <button
+                onClick={() => setViewMode('classic')}
+                className={`px-4 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors ${viewMode === 'classic'
+                  ? 'bg-foreground text-background'
+                  : 'border-[2px] border-foreground hover:bg-foreground/10'
+                  }`}
+              >
+                Classic
+              </button>
             </div>
-            <EmailList />
           </div>
 
-          {/* Email Viewer */}
-          <EmailViewer />
+          {/* Content based on view mode */}
+          {viewMode === 'smart' ? (
+            <SmartInbox onCompose={() => setShowCompose(true)} />
+          ) : (
+            <div className="flex-1 flex overflow-hidden">
+              {/* Email List */}
+              <div className="w-[32rem] border-r-[2px] border-foreground flex flex-col">
+                <EmailList />
+              </div>
+
+              {/* Email Viewer */}
+              <EmailViewer />
+            </div>
+          )}
         </div>
       </div>
 
@@ -104,8 +150,14 @@ function App() {
       {showModelSettings && (
         <ModelSettings onClose={() => setShowModelSettings(false)} />
       )}
+
+      {/* Storage Settings */}
+      {showStorageSettings && (
+        <StorageSettings onClose={() => setShowStorageSettings(false)} />
+      )}
     </>
   )
 }
 
 export default App
+
