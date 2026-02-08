@@ -4,13 +4,14 @@ mod db;
 mod email;
 mod llm;
 
+use commands::account::AccountManager;
 use directories::ProjectDirs;
+use email::idle::IdleManager;
 use std::sync::{Arc, Mutex};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Load environment variables from .env file (development only)
-    // In production builds, this file won't exist and that's fine
     let _ = dotenvy::dotenv();
 
     // Initialize database
@@ -22,10 +23,16 @@ pub fn run() {
     let database = db::EmailDatabase::new(db_path).expect("Failed to initialize database");
     let db_state = Arc::new(Mutex::new(Some(database)));
 
+    // Initialize account manager and IDLE manager
+    let account_manager = AccountManager::new();
+    let idle_manager = IdleManager::new();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(db_state)
+        .manage(account_manager)
+        .manage(idle_manager)
         .invoke_handler(tauri::generate_handler![
             // Auth commands
             commands::check_auth_status,
@@ -34,6 +41,12 @@ pub fn run() {
             commands::refresh_token,
             commands::sign_out,
             commands::get_access_token,
+            // Account commands
+            commands::add_account,
+            commands::remove_account,
+            commands::list_accounts,
+            commands::set_active_account,
+            commands::connect_account,
             // Email commands
             commands::fetch_emails,
             commands::get_email,

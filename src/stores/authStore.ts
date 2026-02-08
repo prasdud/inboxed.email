@@ -44,7 +44,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
       // Start OAuth flow and get authorization URL
       console.log('Calling start_auth...')
-      const authUrl = await invoke<string>('start_auth')
+      const authUrl = await invoke<string>('start_auth', { provider: null, accountId: null })
       console.log('Auth URL:', authUrl)
 
       // Open the URL in the default browser

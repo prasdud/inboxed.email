@@ -64,7 +64,7 @@ export const useSmartInboxStore = create<SmartInboxStore>((set, get) => ({
     }
   },
 
-  fetchSmartInbox: async (limit = 50, offset = 0) => {
+  fetchSmartInbox: async (limit = 500, offset = 0) => {
     try {
       set({ loading: true, error: null })
       const emails = await invoke<EmailWithInsight[]>('get_smart_inbox', {
@@ -77,7 +77,7 @@ export const useSmartInboxStore = create<SmartInboxStore>((set, get) => ({
     }
   },
 
-  getEmailsByCategory: async (category: string, limit = 50) => {
+  getEmailsByCategory: async (category: string, limit = 500) => {
     try {
       set({ loading: true, error: null })
       const emails = await invoke<EmailWithInsight[]>('get_emails_by_category', {
@@ -90,7 +90,7 @@ export const useSmartInboxStore = create<SmartInboxStore>((set, get) => ({
     }
   },
 
-  searchEmails: async (query: string, limit = 50) => {
+  searchEmails: async (query: string, limit = 500) => {
     try {
       set({ loading: true, error: null })
       const emails = await invoke<EmailWithInsight[]>('search_smart_emails', {
@@ -125,16 +125,18 @@ export const useSmartInboxStore = create<SmartInboxStore>((set, get) => ({
     try {
       set({ error: null })
 
-      // Ensure AI is initialized before indexing to get proper summaries
-      const aiStore = useAiStore.getState()
-      if (!aiStore.isAiReady) {
-        console.log('[SmartInbox] Initializing AI before indexing...')
-        await aiStore.initAi()
+      // Try to ensure AI is initialized before indexing, but don't block on failure
+      try {
+        const aiStore = useAiStore.getState()
+        if (!aiStore.isAiReady) {
+          console.log('[SmartInbox] Initializing AI before indexing...')
+          await aiStore.initAi()
+        }
+        await aiStore.checkModelStatus()
+        console.log('[SmartInbox] Model status:', aiStore.modelStatus)
+      } catch (aiError) {
+        console.warn('[SmartInbox] AI init failed, indexing will use fallback:', aiError)
       }
-
-      // Double-check model status
-      await aiStore.checkModelStatus()
-      console.log('[SmartInbox] Model status:', aiStore.modelStatus)
 
       await invoke('start_email_indexing', { maxEmails })
     } catch (error) {
@@ -160,15 +162,27 @@ export const useSmartInboxStore = create<SmartInboxStore>((set, get) => ({
     unlisteners.push(progressUnlisten)
 
     // Listen for completion
-    const completeUnlisten = await listen('indexing:complete', () => {
+    const completeUnlisten = await listen('indexing:complete', async () => {
       set({ indexingProgress: 100 })
-      get().getIndexingStatus()
-      get().fetchSmartInbox()
+      try {
+        await get().getIndexingStatus()
+      } catch (e) {
+        console.error('[SmartInbox] Failed to get indexing status after complete:', e)
+      }
+      try {
+        await get().fetchSmartInbox()
+      } catch (e) {
+        console.error('[SmartInbox] Failed to fetch smart inbox after complete:', e)
+      }
 
       // Auto-embed after indexing completes if RAG is initialized
-      const ragStore = useRagStore.getState()
-      if (ragStore.isInitialized) {
-        ragStore.embedAllEmails()
+      try {
+        const ragStore = useRagStore.getState()
+        if (ragStore.isInitialized) {
+          await ragStore.embedAllEmails()
+        }
+      } catch (e) {
+        console.error('[SmartInbox] Failed to auto-embed after indexing:', e)
       }
     })
     unlisteners.push(completeUnlisten)

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use super::schema::create_tables;
+use crate::auth::account::Account;
 use crate::email::types::Email;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,8 +77,8 @@ impl EmailDatabase {
             "INSERT OR REPLACE INTO emails
             (id, thread_id, subject, from_name, from_email, to_emails, date, snippet,
              body_html, body_plain, is_read, is_starred, has_attachments, labels,
-             created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             created_at, updated_at, account_id, uid, folder, message_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 &email.id,
                 &email.thread_id,
@@ -85,7 +86,7 @@ impl EmailDatabase {
                 &email.from,
                 &email.from_email,
                 serde_json::to_string(&email.to)?,
-                email.date_timestamp, // Use the i64 timestamp instead of String
+                email.date_timestamp,
                 &email.snippet,
                 &email.body_html,
                 &email.body_plain,
@@ -95,6 +96,10 @@ impl EmailDatabase {
                 serde_json::to_string(&email.labels)?,
                 now,
                 now,
+                &email.account_id,
+                email.uid as i64,
+                &email.folder,
+                &email.message_id,
             ],
         )?;
 
@@ -378,6 +383,18 @@ impl EmailDatabase {
         Ok(status)
     }
 
+    /// Get all email IDs (for use by embedding pipeline)
+    pub fn get_all_email_ids(&self, limit: i64) -> AnyhowResult<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare("SELECT id FROM emails ORDER BY date DESC LIMIT ?1")?;
+        let ids = stmt
+            .query_map(params![limit], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+
+        Ok(ids)
+    }
+
     // Get total count of emails
     pub fn get_email_count(&self) -> AnyhowResult<i64> {
         let conn = self.conn.lock().unwrap();
@@ -422,7 +439,7 @@ impl EmailDatabase {
         let mut stmt = conn.prepare(
             "SELECT id, thread_id, subject, from_name, from_email, to_emails,
                     date, snippet, body_html, body_plain, is_read, is_starred,
-                    has_attachments, labels
+                    has_attachments, labels, account_id, uid, folder, message_id
              FROM emails WHERE id = ?1",
         )?;
 
@@ -450,11 +467,170 @@ impl EmailDatabase {
                     is_starred: row.get::<_, i32>(11)? != 0,
                     has_attachments: row.get::<_, i32>(12)? != 0,
                     labels: serde_json::from_str(&labels_json).unwrap_or_default(),
+                    account_id: row.get::<_, String>(14).unwrap_or_else(|_| "legacy".to_string()),
+                    uid: row.get::<_, i64>(15).unwrap_or(0) as u32,
+                    folder: row.get::<_, String>(16).unwrap_or_else(|_| "INBOX".to_string()),
+                    message_id: row.get::<_, String>(17).unwrap_or_default(),
                 })
             })
             .optional()?;
 
         Ok(email)
+    }
+
+    // ========== Account Management ==========
+
+    /// Store a new account
+    pub fn store_account(&self, account: &Account) -> AnyhowResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO accounts
+            (id, email, display_name, provider, imap_host, imap_port, smtp_host, smtp_port,
+             auth_type, is_active, created_at, last_synced_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &account.id,
+                &account.email,
+                &account.display_name,
+                &account.provider,
+                &account.imap_host,
+                account.imap_port as i32,
+                &account.smtp_host,
+                account.smtp_port as i32,
+                &account.auth_type,
+                account.is_active as i32,
+                account.created_at,
+                account.last_synced_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Remove an account and all its data
+    pub fn remove_account(&self, account_id: &str) -> AnyhowResult<()> {
+        let conn = self.conn.lock().unwrap();
+        // Delete insights for this account's emails
+        conn.execute(
+            "DELETE FROM email_insights WHERE email_id IN (SELECT id FROM emails WHERE account_id = ?1)",
+            params![account_id],
+        )?;
+        // Delete embeddings for this account's emails
+        conn.execute(
+            "DELETE FROM email_embeddings WHERE email_id IN (SELECT id FROM emails WHERE account_id = ?1)",
+            params![account_id],
+        )?;
+        // Delete emails
+        conn.execute(
+            "DELETE FROM emails WHERE account_id = ?1",
+            params![account_id],
+        )?;
+        // Delete account
+        conn.execute("DELETE FROM accounts WHERE id = ?1", params![account_id])?;
+        Ok(())
+    }
+
+    /// List all accounts
+    pub fn list_accounts(&self) -> AnyhowResult<Vec<Account>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, email, display_name, provider, imap_host, imap_port, smtp_host, smtp_port,
+                    auth_type, is_active, created_at, last_synced_at
+             FROM accounts ORDER BY created_at ASC",
+        )?;
+
+        let accounts = stmt
+            .query_map([], |row| {
+                Ok(Account {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    display_name: row.get(2)?,
+                    provider: row.get(3)?,
+                    imap_host: row.get(4)?,
+                    imap_port: row.get::<_, i32>(5)? as u16,
+                    smtp_host: row.get(6)?,
+                    smtp_port: row.get::<_, i32>(7)? as u16,
+                    auth_type: row.get(8)?,
+                    is_active: row.get::<_, i32>(9)? != 0,
+                    created_at: row.get(10)?,
+                    last_synced_at: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(accounts)
+    }
+
+    /// Get a single account by ID
+    pub fn get_account(&self, account_id: &str) -> AnyhowResult<Option<Account>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, email, display_name, provider, imap_host, imap_port, smtp_host, smtp_port,
+                    auth_type, is_active, created_at, last_synced_at
+             FROM accounts WHERE id = ?1",
+        )?;
+
+        let account = stmt
+            .query_row([account_id], |row| {
+                Ok(Account {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    display_name: row.get(2)?,
+                    provider: row.get(3)?,
+                    imap_host: row.get(4)?,
+                    imap_port: row.get::<_, i32>(5)? as u16,
+                    smtp_host: row.get(6)?,
+                    smtp_port: row.get::<_, i32>(7)? as u16,
+                    auth_type: row.get(8)?,
+                    is_active: row.get::<_, i32>(9)? != 0,
+                    created_at: row.get(10)?,
+                    last_synced_at: row.get(11)?,
+                })
+            })
+            .optional()?;
+
+        Ok(account)
+    }
+
+    /// Set active account (deactivate all others, activate specified)
+    pub fn set_active_account(&self, account_id: &str) -> AnyhowResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE accounts SET is_active = 0", [])?;
+        conn.execute(
+            "UPDATE accounts SET is_active = 1 WHERE id = ?1",
+            params![account_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get the active account
+    pub fn get_active_account(&self) -> AnyhowResult<Option<Account>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, email, display_name, provider, imap_host, imap_port, smtp_host, smtp_port,
+                    auth_type, is_active, created_at, last_synced_at
+             FROM accounts WHERE is_active = 1 LIMIT 1",
+        )?;
+
+        let account = stmt
+            .query_row([], |row| {
+                Ok(Account {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    display_name: row.get(2)?,
+                    provider: row.get(3)?,
+                    imap_host: row.get(4)?,
+                    imap_port: row.get::<_, i32>(5)? as u16,
+                    smtp_host: row.get(6)?,
+                    smtp_port: row.get::<_, i32>(7)? as u16,
+                    auth_type: row.get(8)?,
+                    is_active: row.get::<_, i32>(9)? != 0,
+                    created_at: row.get(10)?,
+                    last_synced_at: row.get(11)?,
+                })
+            })
+            .optional()?;
+
+        Ok(account)
     }
 
     // Get all cached emails as EmailListItem

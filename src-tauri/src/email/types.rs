@@ -9,7 +9,7 @@ pub struct Email {
     pub from_email: String,
     pub to: Vec<String>,
     pub date: String,
-    pub date_timestamp: i64, // Unix timestamp for database storage
+    pub date_timestamp: i64,
     pub snippet: String,
     pub body_html: Option<String>,
     pub body_plain: Option<String>,
@@ -17,6 +17,11 @@ pub struct Email {
     pub is_read: bool,
     pub is_starred: bool,
     pub has_attachments: bool,
+    // IMAP-specific fields
+    pub account_id: String,
+    pub uid: u32,
+    pub folder: String,
+    pub message_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,61 +38,43 @@ pub struct EmailListItem {
     pub has_attachments: bool,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GmailMessage {
-    pub id: String,
-    #[serde(rename = "threadId")]
-    pub thread_id: String,
-    #[serde(rename = "labelIds", default)]
-    pub label_ids: Vec<String>,
-    pub snippet: String,
-    pub payload: Option<MessagePayload>,
-    #[serde(rename = "internalDate")]
-    pub internal_date: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessagePayload {
-    pub headers: Vec<MessageHeader>,
-    pub body: Option<MessageBody>,
-    pub parts: Option<Vec<MessagePart>>,
-    #[serde(rename = "mimeType")]
-    pub mime_type: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessageHeader {
+/// Represents an IMAP folder/mailbox
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Folder {
+    /// Full folder path (e.g., "[Gmail]/Sent Mail")
     pub name: String,
-    pub value: String,
+    /// Display name (e.g., "Sent Mail")
+    pub display_name: String,
+    /// Special folder type, if detected
+    pub special: Option<SpecialFolder>,
+    /// Hierarchy delimiter (e.g., "/")
+    pub delimiter: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessageBody {
-    pub data: Option<String>,
-    pub size: Option<u64>,
+/// Well-known special folder types (RFC 6154)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SpecialFolder {
+    Inbox,
+    Sent,
+    Trash,
+    Drafts,
+    Spam,
+    Archive,
+    Starred,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessagePart {
-    #[serde(rename = "mimeType")]
-    pub mime_type: Option<String>,
-    pub body: Option<MessageBody>,
-    pub parts: Option<Vec<MessagePart>>,
-    pub filename: Option<String>,
+/// Parsed email address
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAddress {
+    pub name: Option<String>,
+    pub address: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GmailListResponse {
-    pub messages: Option<Vec<GmailMessageId>>,
-    #[serde(rename = "nextPageToken")]
-    pub next_page_token: Option<String>,
-    #[serde(rename = "resultSizeEstimate")]
-    pub result_size_estimate: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GmailMessageId {
-    pub id: String,
-    #[serde(rename = "threadId")]
-    pub thread_id: String,
+impl EmailAddress {
+    pub fn display(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{} <{}>", name, self.address),
+            None => self.address.clone(),
+        }
+    }
 }

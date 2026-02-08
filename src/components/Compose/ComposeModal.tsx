@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+// Account store available for multi-account "From" dropdown
+// import { useAccountStore } from '../../stores/accountStore'
 
 interface ComposeModalProps {
   isOpen: boolean

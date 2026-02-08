@@ -9,6 +9,7 @@ use crate::db::{EmailDatabase, email_db::{EmailWithInsight, IndexingStatus, Emai
 use crate::email::types::Email;
 use crate::auth::storage;
 use crate::commands::ai::SUMMARIZER;
+use crate::commands::account::AccountManager;
 
 type DbState = Arc<Mutex<Option<EmailDatabase>>>;
 
@@ -35,7 +36,7 @@ pub async fn get_smart_inbox(
     let database = db_lock.as_ref().ok_or("Database not initialized")?;
 
     let emails = database
-        .get_emails_by_priority(limit.unwrap_or(50), offset.unwrap_or(0))
+        .get_emails_by_priority(limit.unwrap_or(500), offset.unwrap_or(0))
         .map_err(|e: anyhow::Error| e.to_string())?;
 
     Ok(emails)
@@ -51,7 +52,7 @@ pub async fn get_emails_by_category(
     let database = db_lock.as_ref().ok_or("Database not initialized")?;
 
     let emails = database
-        .get_emails_by_category(&category, limit.unwrap_or(50))
+        .get_emails_by_category(&category, limit.unwrap_or(500))
         .map_err(|e: anyhow::Error| e.to_string())?;
 
     Ok(emails)
@@ -67,7 +68,7 @@ pub async fn search_smart_emails(
     let database = db_lock.as_ref().ok_or("Database not initialized")?;
 
     let emails = database
-        .search_emails(&query, limit.unwrap_or(50))
+        .search_emails(&query, limit.unwrap_or(500))
         .map_err(|e: anyhow::Error| e.to_string())?;
 
     Ok(emails)
@@ -99,6 +100,7 @@ pub async fn reset_indexing_status(db: State<'_, DbState>) -> Result<(), String>
 pub async fn start_email_indexing<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     _db: State<'_, DbState>,
+    _account_manager: State<'_, AccountManager>,
     max_emails: Option<usize>,
 ) -> Result<(), String> {
     // Get database instance
@@ -116,7 +118,7 @@ pub async fn start_email_indexing<R: tauri::Runtime>(
         return Err("Indexing already in progress".to_string());
     }
 
-    // Get access token
+    // Get access token (legacy path, works for both old and new flows)
     let token_data = storage::get_tokens()
         .map_err(|e| format!("Not authenticated: {}", e))?;
 
@@ -230,26 +232,37 @@ async fn generate_email_insights(email: &Email) -> EmailInsight {
         .unwrap_or("");
 
     // Generate summary using the global SUMMARIZER
-    let summary = {
+    // Run in spawn_blocking to avoid blocking the async runtime and to isolate potential panics
+    let subject = email.subject.clone();
+    let from = email.from.clone();
+    let body_owned = body.to_string();
+    let email_id = email.id.clone();
+
+    let summary = match task::spawn_blocking(move || {
         let summarizer_guard = SUMMARIZER.lock().unwrap();
         if let Some(summarizer) = summarizer_guard.as_ref() {
             if summarizer.is_model_loaded() {
-                match summarizer.summarize_email(&email.subject, &email.from, body) {
+                match summarizer.summarize_email(&subject, &from, &body_owned) {
                     Ok(s) => Some(s),
                     Err(e) => {
-                        eprintln!("[Indexing] LLM summarization failed for {}: {}", email.id, e);
+                        eprintln!("[Indexing] LLM summarization failed for {}: {}", email_id, e);
                         None
                     }
                 }
             } else {
-                // Model exists but not loaded - use fallback
-                println!("[Indexing] Model not loaded, using fallback for: {}", email.id);
+                println!("[Indexing] Model not loaded, using fallback for: {}", email_id);
                 summarizer
-                    .summarize_email(&email.subject, &email.from, body)
+                    .summarize_email(&subject, &from, &body_owned)
                     .ok()
             }
         } else {
-            println!("[Indexing] No summarizer available, skipping summary for: {}", email.id);
+            println!("[Indexing] No summarizer available, skipping summary for: {}", email_id);
+            None
+        }
+    }).await {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("[Indexing] Summarization task panicked for {}: {}", email.id, e);
             None
         }
     };
@@ -530,6 +543,23 @@ pub async fn chat_query(
         None
     };
 
+    // Ensure AI is initialized before chat
+    let needs_init = {
+        let summarizer_guard = SUMMARIZER.lock().unwrap();
+        match summarizer_guard.as_ref() {
+            Some(s) => !s.is_model_loaded(),
+            None => true,
+        }
+    };
+
+    if needs_init {
+        eprintln!("[Chat] SUMMARIZER not loaded, attempting initialization...");
+        match crate::commands::ai::init_ai().await {
+            Ok(_) => eprintln!("[Chat] Model loaded successfully"),
+            Err(e) => eprintln!("[Chat] Could not load model: {}", e),
+        }
+    }
+
     // Try to use LLM for response
     let summarizer_guard = SUMMARIZER.lock().unwrap();
     if let Some(summarizer) = summarizer_guard.as_ref() {
@@ -538,18 +568,30 @@ pub async fn chat_query(
             match summarizer.chat(&query, email_context.as_deref()) {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    eprintln!("[Chat] LLM error: {}", e);
-                    // Fall through to fallback
+                    let err_msg = e.to_string();
+                    eprintln!("[Chat] LLM error: {}", err_msg);
+                    drop(summarizer_guard);
+                    // Return context with actual error info, not "model not loaded"
+                    if let Some(ctx) = email_context {
+                        return Ok(format!(
+                            "Here's what I found:\n\n{}\n\n(AI generation error: {})",
+                            ctx, err_msg
+                        ));
+                    }
+                    return Ok(format!(
+                        "I encountered an error generating a response: {}. Try asking again!",
+                        err_msg
+                    ));
                 }
             }
         }
     }
     drop(summarizer_guard);
 
-    // Fallback: return formatted email list or helpful message
+    // Fallback: model genuinely not loaded
     if let Some(ctx) = email_context {
         Ok(format!(
-            "Here's what I found:\n\n{}\n\n(Note: AI model not loaded for detailed analysis)",
+            "Here's what I found:\n\n{}\n\n(AI model not loaded for detailed analysis)",
             ctx
         ))
     } else {

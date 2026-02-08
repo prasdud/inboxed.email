@@ -7,129 +7,183 @@ use oauth2::{
     TokenResponse, TokenUrl,
 };
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 
-use super::storage::{store_tokens, TokenData};
+use super::storage::{store_account_tokens, store_tokens, TokenData};
 
-// OAuth configuration
-const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+// ========== OAuth Provider Configurations ==========
+
 const REDIRECT_URI: &str = "http://localhost:3000/callback";
-const GMAIL_SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
 
-// For desktop applications using PKCE (Proof Key for Code Exchange):
-// - CLIENT_ID is public and safe to embed in the application
-// - CLIENT_SECRET is not required with PKCE, but some OAuth providers still expect it
-// - We load from environment variables in development, fall back to build-time values for production
-//
-// Security Note: For native/desktop apps, Google's OAuth documentation states that
-// client secrets cannot be kept confidential and PKCE provides the security instead.
-fn get_client_id() -> String {
-    // Try environment variable first (development)
-    if let Ok(client_id) = std::env::var("GOOGLE_CLIENT_ID") {
-        return client_id;
-    }
-
-    // Fall back to compile-time environment variable (production builds)
-    // Set via: cargo build --release (with .env file present)
-    option_env!("GOOGLE_CLIENT_ID")
-        .expect("GOOGLE_CLIENT_ID must be set in environment or .env file")
-        .to_string()
+/// Provider-specific OAuth configuration
+#[derive(Debug, Clone)]
+pub struct OAuthProviderConfig {
+    pub auth_url: String,
+    pub token_url: String,
+    pub scopes: Vec<String>,
+    pub client_id_env: &'static str,
+    pub client_secret_env: &'static str,
 }
 
-// For desktop apps with PKCE, client secret is not security-critical
-// Google OAuth allows desktop apps to use a non-confidential client secret
-fn get_client_secret() -> Option<String> {
-    // Try environment variable first
-    if let Ok(secret) = std::env::var("GOOGLE_CLIENT_SECRET") {
-        if !secret.is_empty() {
-            return Some(secret);
+/// Get OAuth config for Google (Gmail IMAP access)
+pub fn google_oauth_config() -> OAuthProviderConfig {
+    OAuthProviderConfig {
+        auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+        token_url: "https://oauth2.googleapis.com/token".to_string(),
+        // Use the full mail scope for IMAP access (not gmail.modify)
+        scopes: vec!["https://mail.google.com/".to_string()],
+        client_id_env: "GOOGLE_CLIENT_ID",
+        client_secret_env: "GOOGLE_CLIENT_SECRET",
+    }
+}
+
+/// Get OAuth config for Microsoft (Outlook IMAP/SMTP access)
+pub fn microsoft_oauth_config() -> OAuthProviderConfig {
+    OAuthProviderConfig {
+        auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
+        token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
+        scopes: vec![
+            "https://outlook.office365.com/IMAP.AccessAsUser.All".to_string(),
+            "https://outlook.office365.com/SMTP.Send".to_string(),
+            "offline_access".to_string(),
+        ],
+        client_id_env: "MICROSOFT_CLIENT_ID",
+        client_secret_env: "MICROSOFT_CLIENT_SECRET",
+    }
+}
+
+/// Get the provider config by name
+pub fn get_provider_config(provider: &str) -> OAuthProviderConfig {
+    match provider.to_lowercase().as_str() {
+        "outlook" | "microsoft" | "hotmail" => microsoft_oauth_config(),
+        _ => google_oauth_config(), // Default to Google
+    }
+}
+
+// ========== Client ID / Secret helpers ==========
+
+fn get_env_var(key: &str) -> Option<String> {
+    // Try runtime environment first
+    if let Ok(val) = std::env::var(key) {
+        if !val.is_empty() {
+            return Some(val);
         }
     }
-
-    // For desktop apps with PKCE, we don't need a client secret
-    // However, if your OAuth provider requires one, you can set it here
-    None
+    // Try compile-time
+    option_env!("GOOGLE_CLIENT_ID").map(|s| s.to_string()) // Fallback for backward compat
 }
 
-/// OAuth state stored during the flow
+fn get_client_id_for_provider(config: &OAuthProviderConfig) -> String {
+    get_env_var(config.client_id_env)
+        .expect(&format!("{} must be set in environment or .env file", config.client_id_env))
+}
+
+fn get_client_secret_for_provider(config: &OAuthProviderConfig) -> Option<String> {
+    get_env_var(config.client_secret_env)
+}
+
+// ========== Legacy single-account helpers (backward compatible) ==========
+
+fn get_client_id() -> String {
+    get_client_id_for_provider(&google_oauth_config())
+}
+
+fn get_client_secret() -> Option<String> {
+    get_client_secret_for_provider(&google_oauth_config())
+}
+
+// ========== OAuth State ==========
+
 pub struct OAuthState {
     pub pkce_verifier: PkceCodeVerifier,
     pub csrf_token: CsrfToken,
     pub callback_receiver: Option<oneshot::Receiver<Result<String>>>,
+    pub account_id: Option<String>,
+    pub provider: String,
 }
 
 lazy_static::lazy_static! {
     static ref OAUTH_STATE: Mutex<Option<OAuthState>> = Mutex::new(None);
 }
 
-/// Generate PKCE code verifier and challenge
+// ========== PKCE ==========
+
 fn generate_pkce() -> (PkceCodeVerifier, PkceCodeChallenge) {
-    // Generate a random code verifier
     let mut rng = rand::thread_rng();
     let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
     let code_verifier = URL_SAFE_NO_PAD.encode(random_bytes);
     let verifier = PkceCodeVerifier::new(code_verifier);
-
-    // Create SHA256 hash for PKCE challenge
     let code_challenge = PkceCodeChallenge::from_code_verifier_sha256(&verifier);
-
     (verifier, code_challenge)
 }
 
-/// Initialize OAuth client
-fn create_oauth_client() -> Result<BasicClient> {
+// ========== OAuth Client ==========
+
+fn create_oauth_client_for_provider(config: &OAuthProviderConfig) -> Result<BasicClient> {
+    let client_id = get_client_id_for_provider(config);
+    let client_secret = get_client_secret_for_provider(config);
+
     let client = BasicClient::new(
-        ClientId::new(get_client_id()),
-        get_client_secret().map(ClientSecret::new),
-        AuthUrl::new(GOOGLE_AUTH_URL.to_string())
-            .context("Failed to create auth URL")?,
-        Some(
-            TokenUrl::new(GOOGLE_TOKEN_URL.to_string())
-                .context("Failed to create token URL")?,
-        ),
+        ClientId::new(client_id),
+        client_secret.map(ClientSecret::new),
+        AuthUrl::new(config.auth_url.clone()).context("Failed to create auth URL")?,
+        Some(TokenUrl::new(config.token_url.clone()).context("Failed to create token URL")?),
     )
     .set_redirect_uri(
-        RedirectUrl::new(REDIRECT_URI.to_string())
-            .context("Failed to create redirect URL")?,
+        RedirectUrl::new(REDIRECT_URI.to_string()).context("Failed to create redirect URL")?,
     );
 
     Ok(client)
 }
 
-/// Start the OAuth flow and return the authorization URL
-pub fn start_oauth_flow() -> Result<String> {
-    let client = create_oauth_client()?;
+fn create_oauth_client() -> Result<BasicClient> {
+    create_oauth_client_for_provider(&google_oauth_config())
+}
 
-    // Generate PKCE challenge
+// ========== Parameterized OAuth Flow ==========
+
+/// Start OAuth flow for a specific provider and optional account
+pub fn start_oauth_flow_for_provider(provider: &str, account_id: Option<&str>) -> Result<String> {
+    let config = get_provider_config(provider);
+    let client = create_oauth_client_for_provider(&config)?;
+
     let (pkce_verifier, pkce_challenge) = generate_pkce();
 
-    // Generate the authorization URL
-    let (authorize_url, csrf_token) = client
+    let mut auth_request = client
         .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new(GMAIL_SCOPE.to_string()))
-        .set_pkce_challenge(pkce_challenge)
-        .url();
+        .set_pkce_challenge(pkce_challenge);
 
-    // Create a channel for receiving the callback
+    for scope in &config.scopes {
+        auth_request = auth_request.add_scope(Scope::new(scope.clone()));
+    }
+
+    let (authorize_url, csrf_token) = auth_request.url();
+
     let (tx, rx) = oneshot::channel();
 
-    // Store the state
     let mut state = OAUTH_STATE.lock().unwrap();
     *state = Some(OAuthState {
         pkce_verifier,
         csrf_token,
         callback_receiver: Some(rx),
+        account_id: account_id.map(|s| s.to_string()),
+        provider: provider.to_string(),
     });
 
-    // Start the callback server
     start_callback_server(tx);
 
     Ok(authorize_url.to_string())
 }
 
-/// Start a simple HTTP server to receive the OAuth callback
+/// Start the legacy OAuth flow (backward compatible — uses Google)
+pub fn start_oauth_flow() -> Result<String> {
+    start_oauth_flow_for_provider("gmail", None)
+}
+
+// ========== Callback Server ==========
+
 fn start_callback_server(tx: oneshot::Sender<Result<String>>) {
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
@@ -143,19 +197,14 @@ fn start_callback_server(tx: oneshot::Sender<Result<String>>) {
             }
         };
 
-        println!("Callback server listening on http://localhost:3000");
-
-        // Accept a single connection
         if let Ok((mut stream, _)) = listener.accept() {
             let mut reader = BufReader::new(&stream);
             let mut request_line = String::new();
             if reader.read_line(&mut request_line).is_ok() {
-                // Parse the request line to get the query parameters
                 if let Some(query_start) = request_line.find("?") {
                     if let Some(query_end) = request_line.find(" HTTP/") {
                         let query = &request_line[query_start + 1..query_end];
 
-                        // Send a success response to the browser
                         let response = "HTTP/1.1 200 OK\r\n\r\n\
                             <html><body>\
                             <h1>Authentication Successful!</h1>\
@@ -164,7 +213,6 @@ fn start_callback_server(tx: oneshot::Sender<Result<String>>) {
                             </body></html>";
                         let _ = stream.write_all(response.as_bytes());
 
-                        // Send the query string back
                         let _ = tx.send(Ok(query.to_string()));
                         return;
                     }
@@ -175,41 +223,38 @@ fn start_callback_server(tx: oneshot::Sender<Result<String>>) {
     });
 }
 
-/// Handle the OAuth callback and exchange code for tokens
+// ========== Token Exchange ==========
+
+/// Handle OAuth callback — exchanges code for tokens, stores them
 pub async fn handle_oauth_callback() -> Result<TokenData> {
-    // Get the stored state and extract it from the mutex in a scope
-    let (pkce_verifier, callback_receiver) = {
+    let (pkce_verifier, callback_receiver, account_id, provider) = {
         let mut state_lock = OAUTH_STATE.lock().unwrap();
-        let state = state_lock
-            .take()
-            .context("No OAuth flow in progress")?;
+        let state = state_lock.take().context("No OAuth flow in progress")?;
 
-        let OAuthState {
-            pkce_verifier,
-            csrf_token: _csrf_token,
-            callback_receiver,
-        } = state;
+        (
+            state.pkce_verifier,
+            state.callback_receiver,
+            state.account_id,
+            state.provider,
+        )
+    };
 
-        (pkce_verifier, callback_receiver)
-    }; // Mutex guard dropped here
-
-    // Wait for the callback
     let query_string = callback_receiver
         .context("No callback receiver")?
         .await
         .context("Failed to receive callback")??;
 
-    // Parse query parameters
-    let params: std::collections::HashMap<_, _> = url::form_urlencoded::parse(query_string.as_bytes())
-        .into_owned()
-        .collect();
+    let params: std::collections::HashMap<_, _> =
+        url::form_urlencoded::parse(query_string.as_bytes())
+            .into_owned()
+            .collect();
 
     let code = params
         .get("code")
         .context("No authorization code in callback")?;
 
-    // Exchange the code for tokens
-    let client = create_oauth_client()?;
+    let config = get_provider_config(&provider);
+    let client = create_oauth_client_for_provider(&config)?;
 
     let token_response = client
         .exchange_code(AuthorizationCode::new(code.clone()))
@@ -218,7 +263,6 @@ pub async fn handle_oauth_callback() -> Result<TokenData> {
         .await
         .context("Failed to exchange authorization code for tokens")?;
 
-    // Calculate expiry time
     let expires_at = Utc::now()
         + Duration::seconds(
             token_response
@@ -235,15 +279,28 @@ pub async fn handle_oauth_callback() -> Result<TokenData> {
         expires_at,
     };
 
-    // Store tokens in keychain
-    store_tokens(&token_data)?;
+    // Store tokens: per-account if account_id is set, otherwise legacy
+    if let Some(ref aid) = account_id {
+        store_account_tokens(aid, &token_data)?;
+    } else {
+        store_tokens(&token_data)?;
+    }
 
     Ok(token_data)
 }
 
-/// Refresh the access token using refresh token
+/// Refresh access token (parameterized by provider and optional account)
 pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenData> {
-    let client = create_oauth_client()?;
+    refresh_access_token_for_provider(refresh_token, "gmail", None).await
+}
+
+pub async fn refresh_access_token_for_provider(
+    refresh_token: &str,
+    provider: &str,
+    account_id: Option<&str>,
+) -> Result<TokenData> {
+    let config = get_provider_config(provider);
+    let client = create_oauth_client_for_provider(&config)?;
 
     let token_response = client
         .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.to_string()))
@@ -261,11 +318,15 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenData> {
 
     let token_data = TokenData {
         access_token: token_response.access_token().secret().clone(),
-        refresh_token: Some(refresh_token.to_string()), // Keep the same refresh token
+        refresh_token: Some(refresh_token.to_string()),
         expires_at,
     };
 
-    store_tokens(&token_data)?;
+    if let Some(aid) = account_id {
+        store_account_tokens(aid, &token_data)?;
+    } else {
+        store_tokens(&token_data)?;
+    }
 
     Ok(token_data)
 }

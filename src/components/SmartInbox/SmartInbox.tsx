@@ -36,6 +36,7 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
     embeddingProgress,
     embeddingStatus,
     allEmailsEmbedded,
+    error: ragError,
     embedAllEmails,
     downloadAndInitRag,
     getEmbeddingStatus,
@@ -44,6 +45,9 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
   const { selectEmail } = useEmailStore()
   const [showChat, setShowChat] = useState(false)
   const [hasIndexed, setHasIndexed] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [isReindexing, setIsReindexing] = useState(false)
+  const [isBuildingIndex, setIsBuildingIndex] = useState(false)
 
   useEffect(() => {
     // Initialize database and fetch status
@@ -66,7 +70,11 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
       const ragStore = useRagStore.getState()
       const downloaded = await ragStore.checkModelDownloaded()
       if (downloaded && !ragStore.isInitialized) {
-        await ragStore.initRag()
+        try {
+          await ragStore.initRag()
+        } catch (e) {
+          console.error('[SmartInbox] Auto-init RAG failed:', e)
+        }
       }
 
       // Fetch embedding status to know if all emails are indexed
@@ -90,23 +98,36 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
   }, [indexingStatus])
 
   const handleStartIndexing = async () => {
+    setActionError(null)
+    setIsReindexing(true)
     try {
       await startIndexing(100)
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      setActionError(`Indexing failed: ${msg}`)
       console.error('Failed to start indexing:', error)
+      await resetIndexingStatus().catch(() => {})
+    } finally {
+      setIsReindexing(false)
     }
   }
 
   const handleBuildIndex = async () => {
+    setActionError(null)
+    setIsBuildingIndex(true)
     try {
       if (!ragReady) {
-        // Download and init the embedding model first
-        await downloadAndInitRag()
+        const initialized = await downloadAndInitRag()
+        if (!initialized) return
       }
       await embedAllEmails()
       await getEmbeddingStatus()
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      setActionError(`Build index failed: ${msg}`)
       console.error('Failed to build index:', error)
+    } finally {
+      setIsBuildingIndex(false)
     }
   }
 
@@ -142,11 +163,17 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
           <p className="text-mutedForeground mb-8">
             Let's index your emails to unlock AI-powered sorting, categorization, and smart search.
           </p>
+          {actionError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-300 text-red-600 text-sm font-mono text-left">
+              {actionError}
+            </div>
+          )}
           <button
             onClick={handleStartIndexing}
-            className="px-6 py-3 bg-foreground text-background hover:bg-gray-700 transition-colors font-mono text-sm uppercase tracking-wider"
+            disabled={isReindexing}
+            className="px-6 py-3 bg-foreground text-background hover:bg-gray-700 transition-colors font-mono text-sm uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Start Indexing
+            {isReindexing ? 'Starting...' : 'Start Indexing'}
           </button>
         </div>
       </div>
@@ -163,7 +190,7 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
               ? `Indexing emails... ${indexingProgress}%`
               : `${emails.length} emails sorted by importance`}
           </p>
-          {ragReady && !indexingStatus?.is_indexing && !isEmbedding && embeddingStatus && (
+          {ragReady && !indexingStatus?.is_indexing && !isEmbedding && embeddingStatus && (embeddingStatus.total_emails > 0 || embeddingStatus.embedded_emails > 0) && (
             <span
               className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono uppercase tracking-wider ${
                 allEmailsEmbedded
@@ -177,7 +204,7 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {onCompose && (
             <button
               onClick={onCompose}
@@ -198,17 +225,19 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
           {!indexingStatus?.is_indexing && !isEmbedding && !allEmailsEmbedded && hasIndexed && (
             <button
               onClick={handleBuildIndex}
-              className="px-4 py-2 border-[2px] border-foreground hover:bg-foreground hover:text-background text-sm font-mono uppercase tracking-wider transition-colors"
+              disabled={isBuildingIndex}
+              className="px-4 py-2 border-[2px] border-foreground hover:bg-foreground hover:text-background text-sm font-mono uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isModelDownloaded ? 'Build Index' : 'Setup AI Index'}
+              {isBuildingIndex ? 'Building...' : isModelDownloaded ? 'Build Index' : 'Setup AI Index'}
             </button>
           )}
           {!indexingStatus?.is_indexing && (
             <button
               onClick={handleStartIndexing}
-              className="px-4 py-2 border-[2px] border-foreground hover:bg-foreground hover:text-background text-sm font-mono uppercase tracking-wider transition-colors"
+              disabled={isReindexing}
+              className="px-4 py-2 border-[2px] border-foreground hover:bg-foreground hover:text-background text-sm font-mono uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Re-index
+              {isReindexing ? 'Re-indexing...' : 'Re-index'}
             </button>
           )}
         </div>
@@ -229,6 +258,32 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
               style={{ width: `${indexingProgress}%` }}
             />
           </div>
+        </div>
+      )}
+
+      {/* Action Error Banner */}
+      {actionError && (
+        <div className="px-6 py-3 bg-red-50 border-b-[2px] border-red-600 flex-shrink-0 flex items-center justify-between">
+          <span className="text-red-600 text-sm font-mono">{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            className="text-red-600 hover:text-red-800 font-mono text-xs uppercase tracking-wider ml-4"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* RAG Error Banner */}
+      {ragError && !actionError && (
+        <div className="px-6 py-3 bg-red-50 border-b-[2px] border-red-600 flex-shrink-0 flex items-center justify-between">
+          <span className="text-red-600 text-sm font-mono">RAG: {ragError}</span>
+          <button
+            onClick={() => useRagStore.setState({ error: null })}
+            className="text-red-600 hover:text-red-800 font-mono text-xs uppercase tracking-wider ml-4"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -260,7 +315,7 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Email List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto min-w-0">
           {loading && emails.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
@@ -321,7 +376,7 @@ export function SmartInbox({ onCompose }: SmartInboxProps) {
 
         {/* Chat Panel */}
         {showChat && (
-          <div className="w-[30%] min-w-[280px] max-w-[24rem] flex-shrink-0 border-l-[2px] border-foreground">
+          <div className="w-[30%] min-w-[240px] max-w-[24rem] border-l-[2px] border-foreground">
             <ChatPanel onClose={() => setShowChat(false)} />
           </div>
         )}

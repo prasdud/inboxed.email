@@ -1,7 +1,69 @@
-use super::types::*;
+use super::types::{Email, EmailListItem};
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::Client;
+use serde::Deserialize;
+
+// Gmail-specific types (legacy, kept for backward compatibility)
+
+#[derive(Debug, Deserialize)]
+pub struct GmailMessage {
+    pub id: String,
+    #[serde(rename = "threadId")]
+    pub thread_id: String,
+    #[serde(rename = "labelIds", default)]
+    pub label_ids: Vec<String>,
+    pub snippet: String,
+    pub payload: Option<MessagePayload>,
+    #[serde(rename = "internalDate")]
+    pub internal_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MessagePayload {
+    pub headers: Vec<MessageHeader>,
+    pub body: Option<MessageBody>,
+    pub parts: Option<Vec<MessagePart>>,
+    #[serde(rename = "mimeType")]
+    pub mime_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MessageHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MessageBody {
+    pub data: Option<String>,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MessagePart {
+    #[serde(rename = "mimeType")]
+    pub mime_type: Option<String>,
+    pub body: Option<MessageBody>,
+    pub parts: Option<Vec<MessagePart>>,
+    pub filename: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GmailListResponse {
+    pub messages: Option<Vec<GmailMessageId>>,
+    #[serde(rename = "nextPageToken")]
+    pub next_page_token: Option<String>,
+    #[serde(rename = "resultSizeEstimate")]
+    pub result_size_estimate: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GmailMessageId {
+    pub id: String,
+    #[serde(rename = "threadId")]
+    pub thread_id: String,
+}
 
 const GMAIL_API_BASE: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -130,7 +192,7 @@ impl GmailClient {
         let has_attachments = Self::has_attachments(msg.payload.as_ref());
 
         Email {
-            id: msg.id,
+            id: msg.id.clone(),
             thread_id: msg.thread_id,
             subject,
             from,
@@ -145,6 +207,10 @@ impl GmailClient {
             is_read,
             is_starred,
             has_attachments,
+            account_id: "legacy".to_string(),
+            uid: 0,
+            folder: "INBOX".to_string(),
+            message_id: msg.id,
         }
     }
 

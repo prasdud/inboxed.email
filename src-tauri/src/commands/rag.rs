@@ -35,10 +35,13 @@ pub struct EmbeddingProgress {
 /// Initialize the RAG system (embedding engine + vector database)
 #[tauri::command]
 pub async fn init_rag(app: AppHandle) -> Result<bool, String> {
+    eprintln!("[RAG] Initializing RAG system...");
+
     // Skip if already initialized
     {
         let guard = RAG_ENGINE.lock().unwrap();
         if guard.as_ref().map(|r| r.is_initialized()).unwrap_or(false) {
+            eprintln!("[RAG] RAG system already initialized, skipping");
             return Ok(true);
         }
     }
@@ -72,6 +75,8 @@ pub async fn init_rag(app: AppHandle) -> Result<bool, String> {
             .await
             .map_err(|e| format!("Failed to download embedding model: {}", e))?;
 
+    eprintln!("[RAG] Embedding model files ready");
+
     // Load embedding engine from downloaded paths
     match EmbeddingEngine::from_paths(
         DEFAULT_EMBEDDING_MODEL,
@@ -95,11 +100,11 @@ pub async fn init_rag(app: AppHandle) -> Result<bool, String> {
                 *rag_guard = Some(rag);
             }
 
+            eprintln!("[RAG] RAG system initialized successfully");
             Ok(true)
         }
         Err(e) => {
-            eprintln!("Warning: Failed to initialize embedding engine: {}", e);
-            Ok(false)
+            Err(format!("Failed to initialize embedding engine: {}", e))
         }
     }
 }
@@ -182,12 +187,28 @@ pub async fn embed_all_emails(app: AppHandle) -> Result<i64, String> {
             .ok_or("Embedding engine not initialized")?
     };
 
-    // Get unembedded email IDs
-    let unembedded_ids = vector_db
-        .get_unembedded_email_ids(1000)
-        .map_err(|e| format!("Failed to get unembedded emails: {}", e))?;
+    // Get all email IDs from the email database, then filter out already-embedded ones
+    let all_email_ids = email_db
+        .get_all_email_ids(1000)
+        .map_err(|e| format!("Failed to get email IDs: {}", e))?;
+
+    eprintln!("[RAG] Found {} email IDs in email DB", all_email_ids.len());
+
+    let embedded_ids = vector_db
+        .get_embedded_email_ids()
+        .map_err(|e| format!("Failed to get embedded email IDs: {}", e))?;
+
+    eprintln!("[RAG] Already embedded: {}", embedded_ids.len());
+
+    let unembedded_ids: Vec<String> = all_email_ids
+        .into_iter()
+        .filter(|id| !embedded_ids.contains(id))
+        .collect();
+
+    eprintln!("[RAG] Unembedded emails to process: {}", unembedded_ids.len());
 
     if unembedded_ids.is_empty() {
+        eprintln!("[RAG] All emails already embedded, nothing to do");
         return Ok(0);
     }
 
@@ -208,45 +229,58 @@ pub async fn embed_all_emails(app: AppHandle) -> Result<i64, String> {
 
     for email_id in unembedded_ids {
         // Get email content
-        if let Ok(Some(email)) = email_db.get_email_by_id(&email_id) {
-            let body = email.body_plain.as_deref().unwrap_or("");
-            let text = prepare_email_text(&email.subject, &email.from_email, body);
-            let text_hash = calculate_text_hash(&text);
+        match email_db.get_email_by_id(&email_id) {
+            Ok(Some(email)) => {
+                let body = email.body_plain.as_deref().unwrap_or("");
+                let text = prepare_email_text(&email.subject, &email.from_email, body);
+                let text_hash = calculate_text_hash(&text);
 
-            // Generate embedding
-            if let Ok(embedding) = embedding_engine.embed(&text) {
-                let email_embedding = crate::db::vector_db::EmailEmbedding {
-                    email_id: email_id.clone(),
-                    embedding,
-                    embedding_model: embedding_engine.model_id().to_string(),
-                    text_hash,
-                    created_at: chrono::Utc::now().timestamp(),
-                };
+                // Generate embedding
+                match embedding_engine.embed(&text) {
+                    Ok(embedding) => {
+                        let email_embedding = crate::db::vector_db::EmailEmbedding {
+                            email_id: email_id.clone(),
+                            embedding,
+                            embedding_model: embedding_engine.model_id().to_string(),
+                            text_hash,
+                            created_at: chrono::Utc::now().timestamp(),
+                        };
 
-                if vector_db.store_embedding(&email_embedding).is_ok() {
-                    embedded_count += 1;
+                        if vector_db.store_embedding(&email_embedding).is_ok() {
+                            embedded_count += 1;
 
-                    // Emit progress event
-                    let _ = app.emit(
-                        "embedding:progress",
-                        EmbeddingProgress {
-                            total,
-                            embedded: embedded_count,
-                            current_email_id: Some(email_id),
-                        },
-                    );
+                            // Emit progress event
+                            let _ = app.emit(
+                                "embedding:progress",
+                                EmbeddingProgress {
+                                    total,
+                                    embedded: embedded_count,
+                                    current_email_id: Some(email_id),
+                                },
+                            );
 
-                    // Update status periodically
-                    if embedded_count % 10 == 0 {
-                        let _ = vector_db.update_embedding_status(
-                            true,
-                            Some(total),
-                            Some(embedded_count),
-                            None,
-                            None,
-                        );
+                            // Update status periodically
+                            if embedded_count % 10 == 0 {
+                                let _ = vector_db.update_embedding_status(
+                                    true,
+                                    Some(total),
+                                    Some(embedded_count),
+                                    None,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[RAG] Failed to embed email {}: {}", email_id, e);
                     }
                 }
+            }
+            Ok(None) => {
+                eprintln!("[RAG] Email {} not found in DB, skipping", email_id);
+            }
+            Err(e) => {
+                eprintln!("[RAG] Failed to fetch email {}: {}", email_id, e);
             }
         }
     }
@@ -255,6 +289,8 @@ pub async fn embed_all_emails(app: AppHandle) -> Result<i64, String> {
     vector_db
         .update_embedding_status(false, Some(total), Some(embedded_count), None, None)
         .map_err(|e| format!("Failed to update status: {}", e))?;
+
+    eprintln!("[RAG] Embedding complete: {}/{} emails embedded", embedded_count, total);
 
     // Emit completion event
     let _ = app.emit("embedding:complete", embedded_count);
@@ -446,14 +482,20 @@ pub fn chat_with_context(
             match summarizer.chat(&query, Some(&context_str)) {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    eprintln!("[RAG Chat] LLM error, returning formatted results: {}", e);
+                    let err_msg = e.to_string();
+                    eprintln!("[RAG Chat] LLM error: {}", err_msg);
+                    drop(summarizer_guard);
+                    return Ok(format!(
+                        "Found {} relevant emails:\n\n{}\n\n(AI generation error: {})",
+                        contexts.len(), context_str, err_msg
+                    ));
                 }
             }
         }
     }
     drop(summarizer_guard);
 
-    // Fallback: return formatted email list if LLM not available
+    // Fallback: model genuinely not loaded
     Ok(format!(
         "Found {} relevant emails:\n\n{}\n\n(AI model not loaded for detailed analysis)",
         contexts.len(),

@@ -21,7 +21,7 @@ function App() {
   const [appState, setAppState] = useState<AppState>('loading')
   const [viewMode, setViewMode] = useState<ViewMode>('smart')
   const { authenticated, loading: authLoading, checkAuth } = useAuthStore()
-  const { modelStatus, checkModelStatus, initAi } = useAiStore()
+  const { modelStatus, checkModelStatus, initAi, isAiReady } = useAiStore()
 
   useEffect(() => {
     checkAuth()
@@ -37,11 +37,11 @@ function App() {
 
   // Initialize AI system after model status is checked (works with or without downloaded model)
   useEffect(() => {
-    if (authenticated && (modelStatus.status === 'downloaded' || modelStatus.status === 'not_downloaded')) {
+    if (authenticated && !isAiReady && (modelStatus.status === 'downloaded' || modelStatus.status === 'not_downloaded')) {
       initAi().catch(console.error)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, modelStatus.status])
+  }, [authenticated, modelStatus.status, isAiReady])
 
   // Determine app state based on auth and model status
   useEffect(() => {
@@ -49,7 +49,7 @@ function App() {
       setAppState('loading')
     } else if (!authenticated) {
       setAppState('login')
-    } else if (modelStatus.status === 'not_downloaded') {
+    } else if (modelStatus.status === 'not_downloaded' && !isAiReady) {
       setAppState('setup')
     } else if (modelStatus.status === 'loading') {
       // Show loading while model is being loaded
@@ -57,7 +57,7 @@ function App() {
     } else {
       setAppState('ready')
     }
-  }, [authLoading, authenticated, modelStatus])
+  }, [authLoading, authenticated, modelStatus, isAiReady])
 
   // Loading state
   if (appState === 'loading') {
@@ -99,7 +99,7 @@ function App() {
           onOpenStorageSettings={() => setShowStorageSettings(true)}
         />
 
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* View Toggle Header */}
           <div className="px-6 py-3 border-b-[2px] border-foreground flex items-center justify-between">
             <h2 className="font-display text-2xl tracking-tight capitalize">

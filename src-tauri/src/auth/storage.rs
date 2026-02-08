@@ -189,6 +189,145 @@ pub fn clear_tokens() -> Result<()> {
     Ok(())
 }
 
+// ========== Per-Account Token Storage ==========
+
+#[derive(Serialize, Deserialize, Default)]
+struct MultiAccountStorage {
+    accounts: std::collections::HashMap<String, AccountTokens>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AccountTokens {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expires_at: Option<String>,
+    app_password: Option<String>,
+}
+
+fn get_multi_account_file_path() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".inboxed");
+        let _ = std::fs::create_dir_all(&path);
+        path.push("account_tokens.json");
+        path
+    } else {
+        let mut path = std::env::temp_dir();
+        path.push("inboxed_account_tokens.json");
+        path
+    }
+}
+
+fn load_multi_account_storage() -> MultiAccountStorage {
+    let path = get_multi_account_file_path();
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+fn save_multi_account_storage(storage: &MultiAccountStorage) -> Result<()> {
+    let json = serde_json::to_string(storage)?;
+    fs::write(get_multi_account_file_path(), json)?;
+    Ok(())
+}
+
+/// Store tokens for a specific account
+pub fn store_account_tokens(account_id: &str, token_data: &TokenData) -> Result<()> {
+    let mut storage = load_multi_account_storage();
+    let entry = storage
+        .accounts
+        .entry(account_id.to_string())
+        .or_insert_with(|| AccountTokens {
+            access_token: None,
+            refresh_token: None,
+            expires_at: None,
+            app_password: None,
+        });
+
+    entry.access_token = Some(token_data.access_token.clone());
+    entry.refresh_token = token_data.refresh_token.clone();
+    entry.expires_at = Some(token_data.expires_at.to_rfc3339());
+
+    save_multi_account_storage(&storage)
+}
+
+/// Get tokens for a specific account
+pub fn get_account_tokens(account_id: &str) -> Result<TokenData> {
+    let storage = load_multi_account_storage();
+    let entry = storage
+        .accounts
+        .get(account_id)
+        .context("No tokens for account")?;
+
+    let access_token = entry
+        .access_token
+        .as_ref()
+        .context("No access token")?
+        .clone();
+
+    let expires_at = entry
+        .expires_at
+        .as_ref()
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&Utc))
+        .context("Invalid expiry time")?;
+
+    Ok(TokenData {
+        access_token,
+        refresh_token: entry.refresh_token.clone(),
+        expires_at,
+    })
+}
+
+/// Store an app password for a specific account
+pub fn store_app_password(account_id: &str, password: &str) -> Result<()> {
+    let mut storage = load_multi_account_storage();
+    let entry = storage
+        .accounts
+        .entry(account_id.to_string())
+        .or_insert_with(|| AccountTokens {
+            access_token: None,
+            refresh_token: None,
+            expires_at: None,
+            app_password: None,
+        });
+
+    entry.app_password = Some(password.to_string());
+
+    save_multi_account_storage(&storage)
+}
+
+/// Get app password for a specific account
+pub fn get_app_password(account_id: &str) -> Result<String> {
+    let storage = load_multi_account_storage();
+    let entry = storage
+        .accounts
+        .get(account_id)
+        .context("No entry for account")?;
+
+    entry
+        .app_password
+        .as_ref()
+        .context("No app password stored")
+        .map(|s| s.clone())
+}
+
+/// Clear all tokens for a specific account
+pub fn clear_account_tokens(account_id: &str) -> Result<()> {
+    let mut storage = load_multi_account_storage();
+    storage.accounts.remove(account_id);
+    save_multi_account_storage(&storage)
+}
+
+/// Check if an account has valid tokens
+pub fn has_valid_account_tokens(account_id: &str) -> bool {
+    match get_account_tokens(account_id) {
+        Ok(token_data) => token_data.expires_at > Utc::now(),
+        Err(_) => false,
+    }
+}
+
 // Helper trait for pipe operation
 trait Pipe: Sized {
     fn pipe<F, R>(self, f: F) -> R

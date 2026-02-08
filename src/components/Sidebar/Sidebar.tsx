@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAiStore } from '../../stores/aiStore'
+import { useAccountStore } from '../../stores/accountStore'
 
 interface Folder {
   id: string
@@ -25,11 +26,24 @@ interface SidebarProps {
 export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings, onOpenStorageSettings }: SidebarProps) {
   const [activeFolder, setActiveFolder] = useState('inbox')
   const { modelStatus, downloadProgress, isModelLoaded } = useAiStore()
+  const { accounts, activeAccountId, fetchAccounts, setActiveAccount } = useAccountStore()
+  const [showAccountMenu, setShowAccountMenu] = useState(false)
+
+  useEffect(() => {
+    fetchAccounts()
+  }, [fetchAccounts])
 
   const handleFolderClick = (folderId: string) => {
     setActiveFolder(folderId)
     onFolderSelect(folderId)
   }
+
+  const handleAccountSwitch = async (accountId: string) => {
+    await setActiveAccount(accountId)
+    setShowAccountMenu(false)
+  }
+
+  const activeAccount = accounts.find((a) => a.id === activeAccountId)
 
   const getAiStatusText = () => {
     switch (modelStatus.status) {
@@ -60,15 +74,84 @@ export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings
     }
   }
 
+  const getProviderColor = (provider: string) => {
+    switch (provider) {
+      case 'gmail':
+        return 'bg-red-500'
+      case 'outlook':
+        return 'bg-blue-500'
+      case 'yahoo':
+        return 'bg-purple-500'
+      default:
+        return 'bg-gray-500'
+    }
+  }
+
   return (
     <div className="w-56 lg:w-64 flex-shrink-0 bg-background border-r-[2px] border-foreground flex flex-col">
       {/* Header */}
       <div className="p-6 border-b-[2px] border-foreground">
         <h1 className="font-display text-3xl tracking-tighter">Inboxed</h1>
         <p className="font-mono text-xs uppercase tracking-widest mt-2 text-mutedForeground">
-          Inbox
+          {activeAccount?.email || 'Inbox'}
         </p>
       </div>
+
+      {/* Account Switcher */}
+      {accounts.length > 0 && (
+        <div className="border-b-[2px] border-foreground">
+          <button
+            onClick={() => setShowAccountMenu(!showAccountMenu)}
+            className="w-full p-4 text-left hover:bg-muted transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${activeAccount ? getProviderColor(activeAccount.provider) : 'bg-gray-400'}`} />
+              <div className="flex-1 min-w-0">
+                <p className="font-serif text-sm truncate">
+                  {activeAccount?.display_name || 'No account'}
+                </p>
+                <p className="font-mono text-xs text-mutedForeground truncate">
+                  {activeAccount?.email || 'Select an account'}
+                </p>
+              </div>
+              <span className="font-mono text-xs text-mutedForeground">
+                {showAccountMenu ? '▲' : '▼'}
+              </span>
+            </div>
+          </button>
+
+          {showAccountMenu && (
+            <div className="border-t border-borderLight">
+              {accounts.map((account) => (
+                <button
+                  key={account.id}
+                  onClick={() => handleAccountSwitch(account.id)}
+                  className={`w-full p-3 text-left hover:bg-muted transition-colors flex items-center gap-3 ${
+                    account.id === activeAccountId ? 'bg-muted' : ''
+                  }`}
+                >
+                  <div className={`w-2 h-2 rounded-full ${getProviderColor(account.provider)}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-serif text-xs truncate">{account.email}</p>
+                  </div>
+                  {account.id === activeAccountId && (
+                    <span className="font-mono text-xs">✓</span>
+                  )}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  setShowAccountMenu(false)
+                  // Navigate to add account — handled by parent
+                }}
+                className="w-full p-3 text-left hover:bg-muted transition-colors font-mono text-xs uppercase tracking-widest text-mutedForeground"
+              >
+                + Add Account
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Compose Button */}
       <div className="p-6 border-b-[2px] border-foreground">
@@ -178,4 +261,3 @@ export default function Sidebar({ onFolderSelect, onCompose, onOpenModelSettings
     </div>
   )
 }
-

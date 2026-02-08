@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use super::schema::create_tables;
+use super::schema::create_vector_tables;
 
 /// Embedding dimensions (all-MiniLM-L6-v2 produces 384-dim vectors)
 pub const EMBEDDING_DIMENSIONS: usize = 384;
@@ -47,7 +47,7 @@ impl VectorDatabase {
         let conn = Connection::open(&db_path)
             .with_context(|| format!("Failed to open database at {:?}", db_path))?;
 
-        create_tables(&conn).context("Failed to create tables")?;
+        create_vector_tables(&conn).context("Failed to create vector tables")?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -183,7 +183,19 @@ impl VectorDatabase {
         Ok(count)
     }
 
-    /// Get email IDs that don't have embeddings
+    /// Get all email IDs that already have embeddings
+    pub fn get_embedded_email_ids(&self) -> AnyhowResult<std::collections::HashSet<String>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare("SELECT email_id FROM email_embeddings")?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<std::collections::HashSet<String>, _>>()?;
+
+        Ok(ids)
+    }
+
+    /// Get email IDs that don't have embeddings (legacy - queries local emails table)
     pub fn get_unembedded_email_ids(&self, limit: i64) -> AnyhowResult<Vec<String>> {
         let conn = self.conn.lock().unwrap();
 

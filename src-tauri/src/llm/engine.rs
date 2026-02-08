@@ -14,6 +14,7 @@ const DEFAULT_MAX_TOKENS: u32 = 256;
 const DEFAULT_TEMPERATURE: f32 = 0.7;
 const DEFAULT_TOP_P: f32 = 0.9;
 const DEFAULT_CONTEXT_SIZE: u32 = 4096;
+const DEFAULT_BATCH_SIZE: u32 = 512;
 
 /// Global singleton for the LlamaBackend (can only be initialized once per process)
 static BACKEND_INIT: Once = Once::new();
@@ -100,9 +101,10 @@ impl LlmEngine {
     where
         F: FnMut(&str),
     {
-        // Create context for this generation
-        let ctx_params =
-            LlamaContextParams::default().with_n_ctx(NonZeroU32::new(DEFAULT_CONTEXT_SIZE));
+        // Create context with explicit n_batch to prevent decode assertion failures
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(NonZeroU32::new(DEFAULT_CONTEXT_SIZE))
+            .with_n_batch(DEFAULT_BATCH_SIZE);
 
         let mut ctx = self
             .model
@@ -115,19 +117,45 @@ impl LlmEngine {
             .str_to_token(prompt, llama_cpp_2::model::AddBos::Always)
             .map_err(|e| anyhow!("Failed to tokenize: {:?}", e))?;
 
-        // Create batch and add prompt tokens
-        let mut batch = LlamaBatch::new(DEFAULT_CONTEXT_SIZE as usize, 1);
+        // Ensure prompt tokens fit within context window (leave room for generation)
+        let max_prompt_tokens = (DEFAULT_CONTEXT_SIZE as usize).saturating_sub(params.max_tokens as usize + 16);
+        let tokens = if tokens.len() > max_prompt_tokens {
+            println!(
+                "[AI] Prompt too long ({} tokens), truncating to {} tokens",
+                tokens.len(),
+                max_prompt_tokens
+            );
+            tokens[..max_prompt_tokens].to_vec()
+        } else {
+            tokens
+        };
 
-        for (i, token) in tokens.iter().enumerate() {
-            let is_last = i == tokens.len() - 1;
-            batch
-                .add(*token, i as i32, &[0], is_last)
-                .map_err(|e| anyhow!("Failed to add token to batch: {:?}", e))?;
+        if tokens.is_empty() {
+            return Err(anyhow!("Prompt produced no tokens"));
         }
 
-        // Process the prompt
-        ctx.decode(&mut batch)
-            .map_err(|e| anyhow!("Failed to decode prompt: {:?}", e))?;
+        // Process prompt in chunks of batch_size to avoid exceeding n_batch
+        let batch_size = DEFAULT_BATCH_SIZE as usize;
+        let num_chunks = (tokens.len() + batch_size - 1) / batch_size;
+
+        for chunk_idx in 0..num_chunks {
+            let start = chunk_idx * batch_size;
+            let end = (start + batch_size).min(tokens.len());
+            let is_last_chunk = chunk_idx == num_chunks - 1;
+
+            let mut batch = LlamaBatch::new(batch_size, 1);
+
+            for (i, token) in tokens[start..end].iter().enumerate() {
+                let pos = (start + i) as i32;
+                let is_last = is_last_chunk && i == (end - start - 1);
+                batch
+                    .add(*token, pos, &[0], is_last)
+                    .map_err(|e| anyhow!("Failed to add token to batch: {:?}", e))?;
+            }
+
+            ctx.decode(&mut batch)
+                .map_err(|e| anyhow!("Failed to decode prompt chunk {}/{}: {:?}", chunk_idx + 1, num_chunks, e))?;
+        }
 
         // Create sampler chain with temperature and top_p
         let seed = rand::random::<u32>();
@@ -140,10 +168,17 @@ impl LlmEngine {
         // Generate tokens
         let mut output = String::new();
         let mut n_cur = tokens.len();
+        let max_ctx = DEFAULT_CONTEXT_SIZE as usize;
+        let mut batch = LlamaBatch::new(1, 1);
 
         for _ in 0..params.max_tokens {
-            // Sample the next token
-            let new_token = sampler.sample(&ctx, (batch.n_tokens() - 1) as i32);
+            // Stop before exceeding the context window
+            if n_cur >= max_ctx - 1 {
+                break;
+            }
+
+            // Sample the next token from the last logit position
+            let new_token = sampler.sample(&ctx, -1);
 
             // Accept the token
             sampler.accept(new_token);
@@ -173,7 +208,7 @@ impl LlmEngine {
             on_token(&token_str);
             output.push_str(&token_str);
 
-            // Prepare next batch
+            // Prepare next batch with the new token
             batch.clear();
             batch
                 .add(new_token, n_cur as i32, &[0], true)

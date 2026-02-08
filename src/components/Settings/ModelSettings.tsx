@@ -44,6 +44,7 @@ export default function ModelSettings({ onClose }: ModelSettingsProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [embeddingDownloading, setEmbeddingDownloading] = useState(false)
   const [embeddedCount, setEmbeddedCount] = useState(0)
+  const [embeddingError, setEmbeddingError] = useState<string | null>(null)
 
   useEffect(() => {
     getAvailableModels()
@@ -62,11 +63,14 @@ export default function ModelSettings({ onClose }: ModelSettingsProps) {
 
   const handleEmbeddingDownload = async () => {
     setEmbeddingDownloading(true)
+    setEmbeddingError(null)
     try {
       await downloadAndInitRag()
       const count = await getEmbeddedCount()
       setEmbeddedCount(count)
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setEmbeddingError(`Model download failed: ${msg}`)
       console.error('Embedding model download failed:', err)
     } finally {
       setEmbeddingDownloading(false)
@@ -74,11 +78,14 @@ export default function ModelSettings({ onClose }: ModelSettingsProps) {
   }
 
   const handleEmbedEmails = async () => {
+    setEmbeddingError(null)
     try {
       await embedAllEmails()
       const count = await getEmbeddedCount()
       setEmbeddedCount(count)
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setEmbeddingError(`Embedding failed: ${msg}`)
       console.error('Embedding failed:', err)
     }
   }
@@ -323,6 +330,18 @@ export default function ModelSettings({ onClose }: ModelSettingsProps) {
             </div>
           )}
 
+          {embeddingError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-300 flex items-center justify-between">
+              <span className="text-red-600 text-sm font-mono">{embeddingError}</span>
+              <button
+                onClick={() => setEmbeddingError(null)}
+                className="text-red-600 hover:text-red-800 font-mono text-xs uppercase tracking-wider ml-4"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-3">
             {!embeddingModelDownloaded && !ragInitialized && (
               <button
@@ -331,6 +350,15 @@ export default function ModelSettings({ onClose }: ModelSettingsProps) {
                 className="px-4 py-2 border-[2px] border-foreground font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {embeddingDownloading ? 'Downloading...' : 'Download Model'}
+              </button>
+            )}
+            {embeddingModelDownloaded && !ragInitialized && (
+              <button
+                onClick={handleEmbeddingDownload}
+                disabled={embeddingDownloading}
+                className="px-4 py-2 border-[2px] border-foreground font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {embeddingDownloading ? 'Initializing...' : 'Initialize Model'}
               </button>
             )}
             {ragInitialized && (

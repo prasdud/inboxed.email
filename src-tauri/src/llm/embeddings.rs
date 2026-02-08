@@ -168,21 +168,50 @@ impl EmbeddingEngine {
         tokenizer_path: &Path,
         weights_path: &Path,
     ) -> Result<Self> {
-        let device = Device::new_metal(0).unwrap_or(Device::Cpu);
-        eprintln!("Loading embedding model '{}' on {:?}", model_id, device);
-
         let config_str = std::fs::read_to_string(config_path)?;
         let config: Config = serde_json::from_str(&config_str)?;
 
         let tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
+        // Try Metal first, fall back to CPU if forward pass fails
+        let metal_device = Device::new_metal(0).ok();
+
+        if let Some(ref device) = metal_device {
+            eprintln!("[RAG] Attempting Metal GPU for embedding model '{}'", model_id);
+            let vb = unsafe {
+                VarBuilder::from_mmaped_safetensors(&[weights_path.to_path_buf()], DTYPE, device)?
+            };
+            let model = BertModel::load(vb, &config)?;
+
+            // Test with a short forward pass to verify Metal works for this model
+            let test_input = Tensor::zeros((1, 1), candle_core::DType::U32, device)?;
+            match model.forward(&test_input, &test_input, None) {
+                Ok(_) => {
+                    eprintln!("[RAG] Metal GPU works, using Metal for embeddings");
+                    return Ok(Self {
+                        model,
+                        tokenizer,
+                        device: device.clone(),
+                        model_id: model_id.to_string(),
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[RAG] Metal forward pass failed ({}), falling back to CPU", e);
+                }
+            }
+        }
+
+        // CPU fallback
+        let device = Device::Cpu;
+        eprintln!("[RAG] Loading embedding model '{}' on CPU", model_id);
+
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_path.to_path_buf()], DTYPE, &device)?
         };
         let model = BertModel::load(vb, &config)?;
 
-        eprintln!("Embedding model loaded successfully");
+        eprintln!("[RAG] Embedding model loaded successfully on CPU");
 
         Ok(Self {
             model,
