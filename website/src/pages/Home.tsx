@@ -7,34 +7,34 @@ export default function Home() {
     return (
         <>
             <SEO
-                title="Local Private LLM Email Client | Inboxed"
-                description="Inboxed is a local private LLM email client that works offline, respects privacy, and replaces cloud AI email tools."
+                title="Private AI Email Client for Mac | Local LLM | Inboxed"
+                description="Inboxed is the premier private email client for macOS. Run on-device AI for email summarization and triage without the cloud. Secure, offline, and fast."
                 schemas={[
                     {
                         "@context": "https://schema.org",
                         "@type": "SoftwareApplication",
                         "name": "Inboxed",
-                        "description": "A local private LLM email client for macOS that runs AI entirely on-device using Apple MLX and llama.cpp. Supports 7B+ parameter models for email summarization, smart categorization, and inbox triage — all offline.",
+                        "description": "A high-performance private email client for macOS. Inboxed uses local LLMs to provide intelligent features like email summarization and smart categorization entirely on-device using Apple MLX and llama.cpp. Supports 7B+ parameter models offline.",
                         "applicationCategory": "BusinessApplication",
                         "operatingSystem": "macOS",
                         "softwareVersion": "1.0",
                         "fileSize": "10MB",
                         "downloadUrl": "https://inboxed.email",
-                        "featureList": "Local LLM email summarization, Smart inbox categorization, Zero-data-exit privacy, Apple Metal GPU acceleration, IMAP direct fetch, Offline AI processing, macOS Keychain credential storage",
+                        "featureList": "Free Superhuman alternative, Private AI email summarization, Local LLM processing, Offline email client capabilities, Apple Metal GPU acceleration, Secure IMAP fetch, Zero-data-exit privacy",
                         "offers": [
                             {
                                 "@type": "Offer",
                                 "name": "Standard",
                                 "price": "0",
                                 "priceCurrency": "USD",
-                                "description": "Free forever with all AI models, unlimited accounts, and community support"
+                                "description": "Free private email client with local AI models, unlimited accounts, and community support"
                             },
                             {
                                 "@type": "Offer",
                                 "name": "Pro Lifetime",
                                 "price": "1.00",
                                 "priceCurrency": "USD",
-                                "description": "One-time payment for priority support, early access features"
+                                "description": "One-time payment for priority support and early access to new private AI features"
                             }
                         ]
                     },
@@ -82,8 +82,14 @@ export default function Home() {
                             <div className="w-full h-px bg-white/20 mb-6" />
                             <ul className="space-y-4 font-body text-lg mb-8 flex-grow opacity-90">
                                 <li className="flex gap-3 items-baseline"><span>&mdash;</span> Everything in Standard</li>
-                                <li className="flex gap-3 items-baseline"><span>&mdash;</span> Priority Support</li>
-                                <li className="flex gap-3 items-baseline"><span>&mdash;</span> Early Access Features</li>
+                                <li className="flex gap-3 items-baseline relative group">
+                                    <span>&mdash;</span> Local fine-tuning (LoRA) using MLX
+                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-white/50 text-white/50 text-[10px] font-mono cursor-default ml-1 shrink-0 self-center">?</span>
+                                    <div className="absolute bottom-full left-0 mb-3 md:bottom-auto md:top-1/2 md:left-full md:-translate-y-1/2 md:mb-0 md:ml-3 w-56 bg-white text-black p-4 shadow-[4px_4px_0px_0px_rgba(255,255,255,0.3)] opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto md:opacity-100 md:pointer-events-auto transition-opacity duration-200 z-10">
+                                        <p className="font-body text-sm leading-snug font-semibold mb-1">Your own private AI model trained on your emails.</p>
+                                        <p className="font-body text-xs leading-relaxed text-black/60">Runs and trains locally on your device.</p>
+                                    </div>
+                                </li>
                                 <li className="flex gap-3 items-baseline"><span>&mdash;</span> Support Development</li>
                             </ul>
                             <button className="bg-white text-black px-8 py-4 text-sm font-medium tracking-widest uppercase hover:bg-gray-200 transition-colors w-full">
@@ -97,8 +103,8 @@ export default function Home() {
                             See how we compare
                         </p>
                         <div className="flex flex-col md:flex-row justify-center gap-4 md:gap-12 font-body text-lg underline-offset-4">
-                            <Link to="/compare/superhuman" className="hover:underline">vs Superhuman</Link>
-                            <Link to="/compare/zero" className="hover:underline">vs 0.email</Link>
+                            <Link to="/compare/superhuman" className="hover:underline text-black font-bold">Free Superhuman Alternative</Link>
+                            <Link to="/compare/canary-mail" className="hover:underline">vs Canary Mail</Link>
                         </div>
                     </div>
                 </div>
